@@ -204,4 +204,28 @@ describe("study AI background integration", () => {
     expect(await studyRequest({kind:"explain"}).response).toMatchObject({ok:true,text:"不完整讲解",warning:expect.stringContaining("截断")});
     expect(disk.has(CACHE)).toBe(false);expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+  it.each(["aborted","insufficient_system_resource"])("does not cache a %s response as a complete explanation",async(finish_reason)=>{
+    disk.set(SETTINGS,configured);
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({choices:[{finish_reason,message:{content:"部分正文"}}]}),{headers:{"Content-Type":"application/json"}}));
+    expect(await studyRequest({kind:"explain",scope:"context"}).response).toMatchObject({ok:true,text:"部分正文",warning:expect.stringContaining("未完成")});
+    expect(disk.has(CACHE)).toBe(false);expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(disk.get("biliscriptJapaneseAiDiagnostics")).toEqual([expect.objectContaining({code:"INTERRUPTED_PARTIAL",finishReason:finish_reason,responseTransport:"json"})]);
+  });
+  it("cancels unexpected SSE before reading it, without automatic retries or exposed response text",async()=>{
+    disk.set(SETTINGS,configured);
+    const cancel=vi.fn(async()=>{}),json=vi.fn();
+    fetchMock.mockResolvedValue({ok:true,status:200,headers:new Headers({"Content-Type":"text/event-stream; charset=utf-8"}),body:{cancel},json});
+    expect(await studyRequest({kind:"explain",scope:"context"}).response).toMatchObject({ok:false,canceled:false,error:expect.stringContaining("流式")});
+    expect(cancel).toHaveBeenCalledTimes(1);expect(json).not.toHaveBeenCalled();expect(fetchMock).toHaveBeenCalledTimes(1);expect(disk.has(CACHE)).toBe(false);
+    expect(disk.get("biliscriptJapaneseAiDiagnostics")).toEqual([expect.objectContaining({code:"UNEXPECTED_STREAM",responseTransport:"event-stream",streamRequested:false,endpointType:"compatible",maxOutputTokens:6144,thinkingMode:"unspecified"})]);
+  });
+  it("does not reuse old cache entries that may contain an incomplete tool preface",async()=>{
+    disk.set(SETTINGS,configured);
+    const oldInput={v:3,base:configured.baseUrl,model:configured.model,kind:"explain",scope:"context",policy:{max_tokens:6144},text:"旧句",context:"",resource:"BV1test000000:111",language:"ja"};
+    const hash=await webcrypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify(oldInput)));
+    const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,"0")).join("");
+    disk.set(CACHE,{[oldKey]:{text:"旧版错误缓存的工具前言",at:Date.now()}});
+    expect(await studyRequest({kind:"explain",scope:"context",text:"旧句"}).response).toMatchObject({ok:true,fromCache:false,text:"自然な訳文"});
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
