@@ -6,7 +6,7 @@ export interface NativeAudioSource {
  status:"ready";bvid:string;cid:string;title:string;duration:number;playableDuration:number;
  subtitleListPresent:boolean;japaneseTrackCount:number;
  source:{url:string;backupUrls:string[]};binding:NativeBinding;
- audit:{exactUrlMatch:true;responseStatus:206;requestStart:number;epochStart:number;videoEpoch:number;cidPathMatch:true;previewSeconds:number|null;accessScope?:"preview"|"logged-in-current-player"|"initial-window";host:string};
+ audit:{exactUrlMatch:true;responseStatus:206;requestStart:number;epochStart:number;videoEpoch:number;cidPathMatch:true;previewSeconds:number|null;accessScope?:"preview"|"current-player"|"continued-playback";host:string};
 }
 export interface NativeUnavailable { status:"unavailable";reason:string;message:string }
 export type NativeSourceResult=NativeAudioSource|NativeUnavailable;

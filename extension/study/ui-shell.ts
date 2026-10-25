@@ -1,0 +1,63 @@
+export function createStudyShell(){
+ const host=document.createElement("div");host.id="biliscript-japanese-study";
+ const controls=document.createElement("div");controls.id="biliscript-study-controls";
+ const roots=[host,controls].map(node=>{const root=node.attachShadow({mode:"open"}),link=document.createElement("link");link.rel="stylesheet";link.href=chrome.runtime.getURL("study/ui.css");root.append(link);return root});
+ const wrap=document.createElement("div");wrap.className="fold";
+ wrap.innerHTML='<section class="panel"><header class="head"><strong>日语学习</strong><button id="enable">开启学习</button><button id="settings" title="学习设置">⚙</button><button id="fold" title="收起阅读区">×</button></header><nav class="tabs" aria-label="学习内容"><button data-pane="subtitles" class="selected" aria-pressed="true">字幕</button><button data-pane="explanation" aria-pressed="false">讲解</button><button data-pane="vocabulary" aria-pressed="false">生词</button></nav><section id="pane-subtitles" class="pane"><div class="subtitle-tools"><button id="reload">刷新字幕</button><button id="import">导入字幕</button><button id="export">导出</button><button id="follow">跟随当前句</button><select id="track" aria-label="日语字幕轨"><option value="">自动选择日语</option></select><label>偏移 <input id="offset" aria-label="字幕偏移秒数" type="number" step=".1" value="0"> 秒</label><p id="source" class="hint">日文 CC 优先；无日文轨时本地识别。</p></div><div id="rows" class="scroll"><div id="current">开启后显示日语字幕</div><div id="chinese"></div></div></section><section id="pane-explanation" class="pane" hidden><div class="reading-header"><strong id="detailTitle">本句讲解</strong><span id="explainScope" class="hint"></span></div><div id="detail" class="scroll markdown"><p class="empty">选中一句字幕，再点击「本句讲解」。</p></div></section><section id="pane-vocabulary" class="pane" hidden><div class="scroll"><div id="wordDetail" class="word-detail"><p class="empty">点击日文单词，查看读音、原形和中文释义。</p></div><div class="reading-header"><strong>已收藏</strong><button id="exportWords">导出</button></div><div id="wordList"></div><p class="hint">词典下载安装位于设置。社区 AI 译词仅作学习参考。</p></div></section><input id="subtitleFile" type="file" accept=".srt,.vtt"></section>';
+ roots[0].append(wrap);
+ const bar=document.createElement("div");
+ bar.innerHTML='<button id="show" class="entry">日语学习</button><section id="learningControls"><div class="toolbar"><span class="study-mark">日语学习</span><span id="position">未载入</span><div class="transport"><button id="prev" title="上一句">← 上句</button><button id="pause">暂停</button><button id="replay">▶ 重播</button><button id="next" title="下一句">下句 →</button><button id="loop" aria-pressed="false">循环：关</button></div><div class="actions"><button id="translate">译这一句</button><button id="explain">本句讲解</button><button id="paragraph">邻近几句</button><button id="record">● 跟读</button></div><button id="readPanel">字幕 / 讲解</button><button id="stopStudy" title="关闭当前视频学习">关闭</button></div><p id="status" role="status">学习已关闭。</p><section id="practice" hidden><header><strong>跟读练习</strong><span id="practiceTime">00:00</span><button id="practiceClose" title="收起跟读">×</button></header><p id="practiceCue"></p><div class="practice-actions"><button id="micStart">● 开始录音</button><button id="micStop" disabled>■ 停止</button><button id="micReplay" disabled>▶ 回放</button><button id="micSave" disabled>保存录音</button><button id="micOriginal">听原声</button><audio id="micAudio" controls hidden></audio></div><p id="practiceStatus" role="status">首次录音会请求本页的麦克风权限，录音保存在本机。最长90秒。</p></section></section>';
+ roots[1].append(bar);
+ document.documentElement.append(host,controls);
+ const $=(id:string)=>roots[0].getElementById(id)||roots[1].getElementById(id);
+ let enabled=false,fullscreen=false,pane="subtitles",idleTimer=0,pinned=false;
+ const layoutChanged=()=>host.dispatchEvent(new Event("study-layout"));
+ const hiddenSiblings=new Map<HTMLElement,{value:string;priority:string}>();
+ function restore(){for(const [el,style]of hiddenSiblings){el.style.setProperty("display",style.value,style.priority)}hiddenSiblings.clear()}
+ function setPane(next:string){
+  pane=next;for(const el of roots[0].querySelectorAll<HTMLButtonElement>("[data-pane]")){const active=el.dataset.pane===next;el.classList.toggle("selected",active);el.setAttribute("aria-pressed",String(active))}
+  for(const name of ["subtitles","explanation","vocabulary"])$ ("pane-"+name)!.hidden=name!==next;
+  wrap.classList.remove("fold");updateVisible();
+ }
+ function updateVisible(){
+  host.hidden=!enabled||wrap.classList.contains("fold");
+  controls.hidden=fullscreen&&!enabled;
+  $("learningControls")!.hidden=!enabled;$("show")!.hidden=enabled;
+  controls.toggleAttribute("data-enabled",enabled);
+  layoutChanged();
+ }
+ function reveal(){
+  if(!fullscreen)return;
+  controls.classList.remove("idle");clearTimeout(idleTimer);
+  idleTimer=window.setTimeout(()=>{if(!pinned&&!controls.matches(":hover")&&!roots[1].activeElement?.matches(":focus-visible"))controls.classList.add("idle");else reveal()},3200);
+ }
+ function mount(video:HTMLVideoElement|null){
+  const full=document.fullscreenElement,nowFull=!!full;
+  if(nowFull!==fullscreen){fullscreen=nowFull;if(fullscreen)wrap.classList.add("fold");else if(enabled)wrap.classList.remove("fold");reveal()}
+  host.toggleAttribute("data-fullscreen",fullscreen);controls.toggleAttribute("data-fullscreen",fullscreen);
+  if(full&&full.tagName!=="VIDEO"){
+   restore();if(host.parentNode!==full)full.append(host);if(controls.parentNode!==full)full.append(controls);
+  }else if(!full){
+   const player=video?.closest("#bilibili-player,#bilibiliPlayer,.bilibili-player")||video?.closest(".bpx-player-container")||video?.parentElement;
+   if(player&&controls.previousElementSibling!==player)player.after(controls);
+   const side=document.querySelector<HTMLElement>(".right-container-inner,.right-container");
+   if(side&&innerWidth>=1100&&side.getBoundingClientRect().width>=250&&!side.contains(video)){
+    if(host.parentNode!==side){restore();side.prepend(host)}
+    if(enabled&&!wrap.classList.contains("fold")){
+     for(const el of [...side.children])if(el!==host&&el instanceof HTMLElement&&!hiddenSiblings.has(el)){hiddenSiblings.set(el,{value:el.style.getPropertyValue("display"),priority:el.style.getPropertyPriority("display")});el.style.setProperty("display","none","important")}
+    }else restore();
+    host.removeAttribute("data-below");
+   }else{restore();if(host.previousElementSibling!==controls)controls.after(host);host.setAttribute("data-below","")}
+  }
+  updateVisible();
+ }
+ roots[0].querySelectorAll<HTMLButtonElement>("[data-pane]").forEach(el=>el.onclick=()=>setPane(el.dataset.pane!));
+ $("fold")!.onclick=()=>{wrap.classList.add("fold");restore();updateVisible()};
+ $("readPanel")!.onclick=()=>{wrap.classList.toggle("fold");updateVisible();reveal()};
+ document.addEventListener("pointermove",reveal,{passive:true});document.addEventListener("keydown",reveal);
+ controls.addEventListener("pointerleave",reveal);
+ return {host,controls,shadow:roots[0],wrap,$,setPane,mount,layoutChanged,
+  setEnabled(value:boolean){enabled=value;if(!enabled){restore();wrap.classList.add("fold")}updateVisible();reveal()},
+  pin(value:boolean){pinned=value;reveal()},reveal,get pane(){return pane}
+ };
+}

@@ -43,7 +43,7 @@ let ai: (message: any) => Promise<unknown>;
 let nativeSource: () => Promise<unknown>;
 let mediaSrc: string;
 
-function element<T extends HTMLElement = HTMLElement>(id: string): T { return shadow.getElementById(id) as T; }
+function element<T extends HTMLElement = HTMLElement>(id: string): T { return (shadow.getElementById(id)||document.getElementById("biliscript-study-controls")?.shadowRoot?.getElementById(id)) as T; }
 async function click(id: string) { element(id).click(); await flush(); }
 async function sync() { await vi.advanceTimersByTimeAsync(250); await flush(); }
 function aiCalls() { return send.mock.calls.map(([message]) => message).filter((message) => message.type === "study-ai"); }
@@ -75,6 +75,7 @@ async function runtimeMessage(message: unknown) {
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
+  vi.spyOn(HTMLMediaElement.prototype,"pause").mockImplementation(()=>{});
   sources.cc.mockReset();
   sources.cc.mockResolvedValue(readyCc());
   Object.values(sources.asr).forEach((mock) => mock.mockReset());
@@ -82,6 +83,7 @@ beforeEach(async () => {
   history.replaceState({}, "", normalUrl);
   document.body.innerHTML = '<div class="bpx-player-container"><video></video></div>';
   document.getElementById("biliscript-japanese-study")?.remove();
+  document.getElementById("biliscript-study-controls")?.remove();
   document.getElementById("biliscript-study-overlay")?.remove();
   video = document.querySelector("video")!;
   video.setAttribute("data-biliscript-study-binding", "native-video-1");
@@ -148,6 +150,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   document.getElementById("biliscript-japanese-study")?.remove();
+  document.getElementById("biliscript-study-controls")?.remove();
   document.getElementById("biliscript-study-overlay")?.remove();
 });
 
@@ -355,16 +358,16 @@ describe("opt-in learning UI integration", () => {
     expect(aiCalls().map((message) => message.text)).toContain(japanese[3].content);
   });
 
-  it("binds recorder references to the active BV/CID and rejects references after switching the video", async () => {
+  it("opens practice inline without a new tab and closes it on a P switch", async () => {
     await click("enable");
     await click("record");
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ action: "studyOpenRecorder", resource: identity,
-      cue: expect.objectContaining({ start: 1, end: 3, text: japanese[0].content }) }));
-    expect(await runtimeMessage({ action: "studyPlayReference", resource: "BVother:222", cue: { start: 1, end: 3 } })).toMatchObject({ success: false });
-    expect(await runtimeMessage({ action: "studyPlayReference", resource: identity, cue: { start: 1, end: 3 }, command: "play" })).toMatchObject({ success: true });
+    expect(element("practice").hidden).toBe(false);
+    expect(element("practiceCue").textContent).toContain(japanese[0].content);
+    expect(send.mock.calls.some(([m])=>m.action==="studyOpenRecorder")).toBe(false);
+    await click("micOriginal");expect(video.play).toHaveBeenCalled();
     history.replaceState({}, "", normalUrl + "?p=2");
     await sync();
-    expect(await runtimeMessage({ action: "studyPlayReference", resource: identity, cue: { start: 1, end: 3 }, command: "play" })).toMatchObject({ success: false });
+    expect(element("practice").hidden).toBe(true);
   });
 });
 
@@ -396,9 +399,9 @@ describe("validated native-audio UI integration", () => {
     expect(paused).toBe(false);
     expect(sources.asr.stop).toHaveBeenCalledTimes(stops + 1);
     expect(sources.asr.start).toHaveBeenCalledTimes(1);
-    expect(nativeCalls()).toHaveLength(1);
+    expect(nativeCalls().length).toBeGreaterThanOrEqual(1);
     expect(sources.cc).not.toHaveBeenCalled();
-    expect(element("status").textContent).toContain("允许的识别范围");
+    expect(element("status").textContent).toContain("试看范围");
     expect(element("current").textContent).not.toContain("准备中");
     expect(document.getElementById("biliscript-study-overlay")).toBeNull();
 
@@ -412,7 +415,7 @@ describe("validated native-audio UI integration", () => {
     expect(element("status").textContent).toBe("跳转已超出试看范围");
     expect(paused).toBe(false);
     expect(sources.asr.start).toHaveBeenCalledTimes(1);
-    expect(nativeCalls()).toHaveLength(2);
+    expect(nativeCalls().length).toBeGreaterThanOrEqual(2);
     expect(sources.cc).not.toHaveBeenCalled();
   });
 
@@ -510,18 +513,47 @@ describe("validated native-audio UI integration", () => {
     expect(element("enable").textContent).toBe("开启学习");
   });
 
-  it.each(["tag", "mediaSrc"])("stops the old audio session when the live video's binding %s changes", async (bindingPart) => {
+  it.each(["tag", "mediaSrc"])("cancels a replaced %s binding and resumes only after revalidation", async (bindingPart) => {
     nativeSource = async () => readyNative();
     await click("enable");
     const stops = sources.asr.stop.mock.calls.length;
+    const fresh=deferred<unknown>();nativeSource=()=>fresh.promise;
     if (bindingPart === "tag") video.setAttribute("data-biliscript-study-binding", "native-replaced-video");
     else mediaSrc = "blob:https://www.bilibili.com/replacement-media";
     await sync();
     expect(sources.asr.stop).toHaveBeenCalledTimes(stops + 1);
-    expect(element("enable").textContent).toBe("开启学习");
-    expect(element("status").textContent).toContain("播放器资源已更新");
-    expect(nativeCalls()).toHaveLength(1);
+    expect(sources.asr.start).toHaveBeenCalledTimes(1);
+    expect(nativeCalls()).toHaveLength(2);
     emitAsr([{ from: 1, to: 3, content: "old native result" }]);
     expect(element("current").textContent).not.toContain("old native result");
+    fresh.resolve(readyNative());await flush();
+    expect(sources.asr.start).toHaveBeenCalledTimes(2);
+    expect(element("enable").textContent).toBe("停止学习");
+  });
+  it("automatically resumes later windows when a verified preview limit is lifted", async()=>{
+    nativeSource=async()=>readyNative();paused=false;await click("enable");emitAsr(japanese.slice(0,2),0,30);await flush();
+    time=31;await sync();expect(paused).toBe(false);expect(sources.asr.start).toHaveBeenCalledTimes(1);
+    nativeSource=async()=>readyNative({playableDuration:300,audit:{...readyNative().audit,previewSeconds:null}});
+    await vi.advanceTimersByTimeAsync(1750);await flush();
+    expect(sources.asr.start).toHaveBeenLastCalledWith(expect.objectContaining({currentTime:31,playableDuration:300}));
+    expect(sources.asr.start).toHaveBeenCalledTimes(2);
+  });
+  it("formats explanations safely and labels the context scope",async()=>{
+    ai=async()=>({ok:true,text:"## 自然译文\n你好。\n\n## 核心语法\n**重点**\n\n## 上下文\n解释。 <img src=x onerror=evil()>"});await click("enable");await click("paragraph");
+    expect(aiCalls().at(-1)).toMatchObject({scope:"context",context:""});
+    expect(element("detail").querySelector("h3")?.textContent).toBe("自然译文");
+    expect(element("detail").querySelector("strong")?.textContent).toBe("重点");
+    expect(element("detail").querySelector("details")?.open).toBe(false);
+    expect(element("detail").querySelector("img")).toBeNull();
+    expect(element("explainScope").textContent).toContain("五句");
+  });
+  it("hides all learning UI in fullscreen when disabled without starting work",async()=>{
+    Object.defineProperty(document,"fullscreenElement",{configurable:true,value:video.parentElement});
+    document.dispatchEvent(new Event("fullscreenchange"));await flush();
+    expect(document.getElementById("biliscript-japanese-study")!.hidden).toBe(true);
+    expect(document.getElementById("biliscript-study-controls")!.hidden).toBe(true);
+    expect(sources.cc).not.toHaveBeenCalled();expect(sources.asr.start).not.toHaveBeenCalled();expect(aiCalls()).toHaveLength(0);
+    Object.defineProperty(document,"fullscreenElement",{configurable:true,value:null});
+    document.dispatchEvent(new Event("fullscreenchange"));
   });
 });

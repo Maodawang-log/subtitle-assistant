@@ -187,4 +187,21 @@ describe("study AI background integration", () => {
     expect(await studyRequest({ kind: "automatic-summary" }).response).toMatchObject({ ok: false, error: expect.stringContaining("未知") });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it("diagnoses context exhaustion without leaking content, retrying or caching an empty answer",async()=>{
+    disk.set(SETTINGS,{...configured,baseUrl:"https://api.deepseek.com"});
+    fetchMock.mockResolvedValue({ok:true,status:200,json:async()=>({choices:[{finish_reason:"length",message:{content:null,reasoning_content:"PRIVATE_REASONING"}}],usage:{completion_tokens:1500}})});
+    const r=await studyRequest({kind:"explain",scope:"context",text:"PRIVATE_SUBTITLES"}).response;
+    expect(r).toMatchObject({ok:false,error:expect.stringContaining("输出额度耗尽")});
+    expect(fetchMock).toHaveBeenCalledTimes(1);expect(disk.has(CACHE)).toBe(false);
+    const body=JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(body).toMatchObject({max_tokens:6144,thinking:{type:"disabled"}});
+    expect(JSON.parse(body.messages[1].content)).toEqual({text:"PRIVATE_SUBTITLES",context:""});
+    const diagnostics=JSON.stringify(disk.get("biliscriptJapaneseAiDiagnostics"));
+    expect(diagnostics).toContain("OUTPUT_LIMIT");for(const secret of ["PRIVATE_REASONING","PRIVATE_SUBTITLES",configured.apiKey,"api.deepseek.com"])expect(diagnostics).not.toContain(secret);
+  });
+  it("shows partial text with a warning and never caches it as a complete explanation",async()=>{
+    disk.set(SETTINGS,configured);fetchMock.mockResolvedValue({ok:true,status:200,json:async()=>({choices:[{finish_reason:"length",message:{content:"不完整讲解"}}]})});
+    expect(await studyRequest({kind:"explain"}).response).toMatchObject({ok:true,text:"不完整讲解",warning:expect.stringContaining("截断")});
+    expect(disk.has(CACHE)).toBe(false);expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

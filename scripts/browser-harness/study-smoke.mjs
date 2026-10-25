@@ -18,7 +18,7 @@ const nativeStaleOnly = process.argv.includes("--native-stale-only");
 const requestedUrl = process.argv.find((arg) => arg.startsWith("--public-url="))?.slice("--public-url=".length);
 const approvedPublicUrls = ["https://www.bilibili.com/video/BV1Qtnt6JEy8/", "https://www.bilibili.com/video/BV1wYAmeqEuV/"];
 if (requestedUrl && !approvedPublicUrls.includes(requestedUrl)) throw new Error("Public URL is outside the explicitly approved pair");
-const out = artifactDir(nativeStaleOnly ? "japanese-study-native-stale-2.6.3.2" : nativeE2e ? finalDist ? "japanese-study-native-e2e-final-2.6.3.2" : "japanese-study-native-e2e-2.6.3.2" : auditAssociation ? "japanese-study-audio-association" : inspectPageState ? "japanese-study-native-state" : fixtureOnly ? "japanese-study-fixture" : realOnly ? "japanese-study-real-news" : "japanese-study");
+const out = artifactDir(nativeStaleOnly ? "japanese-study-native-stale-2.6.3.3" : nativeE2e ? finalDist ? "japanese-study-native-e2e-final-2.6.3.3" : "japanese-study-native-e2e-2.6.3.3" : auditAssociation ? "japanese-study-audio-association" : inspectPageState ? "japanese-study-native-state" : fixtureOnly ? "japanese-study-fixture" : realOnly ? "japanese-study-real-news" : "japanese-study");
 const wavFile = path.resolve(REPO_ROOT, "..", "..", "local-asr", "tests", "jsut-000.wav");
 await mkdir(tempRoot, { recursive: true });
 // Process-local environment only. os.tmpdir() in launchBrowser now stays on E:.
@@ -33,13 +33,13 @@ const check = (name, ok, detail) => {
 const safeError = (error) => String(error?.message || error).replace(/https?:\/\/[^\s"']+/g, "[URL redacted]").slice(0, 450);
 const pause = async () => page?.cdp.evaluate("document.querySelectorAll('video,audio').forEach(m=>m.pause())", { timeoutMs: 3000 }).catch(() => {});
 const snap = (name) => screenshot(page.cdp, path.join(out, name + ".png"));
-const domState = `(() => { const h=document.getElementById('biliscript-japanese-study'),s=h?.shadowRoot;
- return {host:!!h,visible:!!h&&getComputedStyle(h).display!=='none',status:s?.getElementById('status')?.textContent,
- show:s?.getElementById('show')?.textContent,enable:s?.getElementById('enable')?.textContent,
+const domState = `(() => { const h=document.getElementById('biliscript-japanese-study'),s=h?.shadowRoot,t=document.getElementById('biliscript-study-controls')?.shadowRoot||s;
+ return {host:!!h,visible:!!h&&getComputedStyle(h).display!=='none',status:t?.getElementById('status')?.textContent,
+ show:t?.getElementById('show')?.textContent,enable:s?.getElementById('enable')?.textContent,
  current:s?.getElementById('current')?.textContent,chinese:s?.getElementById('chinese')?.textContent,
- position:s?.getElementById('position')?.textContent,overlay:!!document.getElementById('biliscript-study-overlay')}; })()`;
+ position:t?.getElementById('position')?.textContent,overlay:!!document.getElementById('biliscript-study-overlay')}; })()`;
 async function click(selector, shadow = true) {
-  const target = shadow ? `document.getElementById('biliscript-japanese-study')?.shadowRoot?.querySelector(${JSON.stringify(selector)})`
+  const target = shadow ? `(document.getElementById('biliscript-japanese-study')?.shadowRoot?.querySelector(${JSON.stringify(selector)})||document.getElementById('biliscript-study-controls')?.shadowRoot?.querySelector(${JSON.stringify(selector)}))`
     : `document.querySelector(${JSON.stringify(selector)})`;
   const point = await page.cdp.evaluate(`(() => {const e=${target};if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();
     const x=r.x+r.width/2,y=r.y+r.height/2;const root=e.getRootNode();return {x,y,w:r.width,h:r.height,hit:root.elementFromPoint(x,y)===e};})()`);
@@ -64,7 +64,7 @@ try {
   const ext = await worker.evaluate("({id:chrome.runtime.id,version:chrome.runtime.getManifest().version,name:chrome.runtime.getManifest().name,listeners:chrome.runtime.onMessage.hasListeners()})");
   check("study-extension-loaded", ext.name === "BiliScript 日语学习" && worker.handle.url.endsWith("/entry/study-background.js") && ext.listeners, { name: ext.name, version: ext.version });
   evidence.extension = ext;
-  if (nativeE2e || nativeStaleOnly) check("native-version-2.6.3.2", ext.version === "2.6.3.2");
+  if (nativeE2e || nativeStaleOnly) check("native-version-2.6.3.3", ext.version === "2.6.3.3");
   await page.cdp.send("Page.navigate", { url: `chrome-extension://${ext.id}/study/options.html` });
   await waitFor("study settings page", () => page.cdp.evaluate("document.getElementById('autoStart')!==null"));
   const config = await page.cdp.evaluate("chrome.runtime.sendMessage({type:'study-settings-public'}).then(r=>({ok:r?.ok,autoStart:r?.config?.autoStart,autoTranslate:r?.config?.autoTranslate,configured:r?.config?.configured,asrModel:r?.config?.asrModel}))");
@@ -344,9 +344,13 @@ try {
     await click("#show");
     await waitFor("real first-window result or explicit failure", async () => {
       const state = await page.cdp.evaluate(domState);
-      return state.overlay || /失败|未启动|无法|风控/.test(state.status || "");
+      return state.overlay || /字幕已准备|字幕已就绪|失败|未启动|无法|风控/.test(state.status || "");
     }, { timeoutMs: 25000, intervalMs: 300 }).catch((error) => { evidence.realPublicPage.waitError = safeError(error); });
     await pause();
+    if(nativeE2e){
+      const hasRows=await page.cdp.evaluate("!!document.getElementById('biliscript-japanese-study')?.shadowRoot?.querySelector('.cue-time')");
+      if(hasRows){await click('.cue-time');await sleep(350);await pause()}
+    }
     if (nativeE2e) await sleep(300);
     evidence.realPublicPage.enabled = await page.cdp.evaluate(`({study:(${domState}),source:document.getElementById('biliscript-japanese-study')?.shadowRoot?.getElementById('source')?.textContent,
       rows:[...document.getElementById('biliscript-japanese-study')?.shadowRoot?.querySelectorAll('.cue')||[]].slice(0,5).map(e=>e.textContent)})`);

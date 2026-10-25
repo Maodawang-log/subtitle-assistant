@@ -27,7 +27,8 @@
 | [0019](0019-settings-toggle-custom-drawn-boundary.md) | 设置抽屉布尔开关自绘 toggle-switch，操作型复选框保持原生 | 有效 | 自绘控件边界（持久设置布尔开关可自绘）；推翻 reader-settings-shell.css「不引入自定义替代控件」旧约定 |
 
 | [0020](0020-japanese-study-opt-in-variant.md) | 日语学习衍生入口按视频开启、限量本地ASR | 有效 | 用户2026-10-25明确要求覆盖该衍生入口的ADR-0017自动预抓；原入口保留 |
-| [0021](0021-current-player-audio-association.md) | 当前播放器音轨身份关联 | 有效 | 2.6.3.2只读复用已验证当前代次206音轨，严格限制试看范围 |
+| [0021](0021-current-player-audio-association.md) | 当前播放器音轨身份关联 | 部分被取代 | 范围判断与恢复由0022取代；当前代次206身份关联仍有效 |
+| [0022](0022-study-reading-dictionary-and-playback.md) | 日语学习阅读布局、词典安装与动态播放范围 | 有效 | 取代0021的未知登录30秒上限；用户确认的六项迭代 |
 
 编号一经分配不复用：裁决被推翻或被取代时新开一篇（见体例规则 3），退役编号留空行占位，不重开。
 

@@ -79,8 +79,8 @@ describe("current-player audio association",()=>{
   info.dash.duration=127;expect(readNativeStudyPage().status).toBe("ready");info.dash.duration=124;expect(readNativeStudyPage()).toMatchObject({reason:"DURATION"});
   info.dash.duration=128;document.querySelector("span")!.textContent="试看";expect(readNativeStudyPage()).toMatchObject({reason:"PREVIEW_UNKNOWN"});
  });
- it("rejects requests after the allowed preview and never uses seekable as authorization",()=>{
-  Object.defineProperty(video,"seekable",{value:{length:1,start:()=>0,end:()=>128}});time=30;expect(readNativeStudyPage()).toMatchObject({reason:"PREVIEW_END"});
+ it("returns the explicit cap for rechecking at its end; seekable does not expand it",()=>{
+  Object.defineProperty(video,"seekable",{value:{length:1,start:()=>0,end:()=>128}});time=30;expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:30});
  });
  it("distinguishes an absent subtitle list from a known empty one",()=>{
   delete vd.subtitle;expect(readNativeStudyPage()).toMatchObject({status:"ready",subtitleListPresent:false});
@@ -92,9 +92,9 @@ describe("current-player audio association",()=>{
  it("keeps a latched shorter preview even after its toast is closed",()=>{
   state.previewLimit=10;document.querySelector("span")!.remove();expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:10,audit:{previewSeconds:10}});
  });
- it("caps unknown login/full-access state to the initial window, never seekable duration",()=>{
-  document.querySelector("span")!.remove();expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:30,audit:{accessScope:"initial-window"}});
-  (globalThis as any).__INITIAL_STATE__.isLogin=true;expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:128,audit:{accessScope:"logged-in-current-player"}});
+ it("does not invent a 30-second cap from missing login metadata",()=>{
+  document.querySelector("span")!.remove();expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:128,audit:{accessScope:"current-player"}});
+  (globalThis as any).__INITIAL_STATE__.isLogin=true;expect(readNativeStudyPage()).toMatchObject({status:"ready",playableDuration:128,audit:{accessScope:"current-player"}});
   vd.is_upower_exclusive=true;expect(readNativeStudyPage()).toMatchObject({reason:"PREVIEW_UNKNOWN"});
  });
  it("validates response shape and compares every binding component",()=>{

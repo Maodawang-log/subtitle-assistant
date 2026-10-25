@@ -25,14 +25,15 @@ export function readNativeStudyPage(){
  const previewText=labels.join(" "),match=previewText.match(/试看\s*(\d+(?:\.\d+)?)\s*秒/);
  let previewSeconds:number|null=match?Number(match[1]):null;
  if(Number.isFinite(state.previewLimit)&&state.previewLimit>0)previewSeconds=previewSeconds===null?state.previewLimit:Math.min(previewSeconds,state.previewLimit);
- const restricted=!!(state.previewUnknown||vd.is_upower_exclusive||vd.is_upower_preview||info?.is_preview||info?.is_upower_preview)||/试看|登录.{0,8}(?:观看|继续)|付费|充电/.test(previewText);
+ const released=Number.isFinite(state.releasedLimit)&&state.releasedLimit>0;
+ if(released&&previewSeconds!==null&&previewSeconds<=state.releasedLimit)previewSeconds=null;
+ const restricted=!!state.previewUnknown||!released&&(!!(vd.is_upower_exclusive||vd.is_upower_preview||info?.is_preview||info?.is_upower_preview)||/试看|登录.{0,8}(?:观看|继续)|付费|充电/.test(previewText));
  if(restricted&&previewSeconds===null){
   const ms=Number(info?.timelength);if(Number.isFinite(ms)&&ms>0&&ms/1000<duration-1)previewSeconds=ms/1000;
   else return no("PREVIEW_UNKNOWN","页面显示观看限制，但无法确认允许识别的时长。");
  }
- const fullLoginConfirmed=w.__INITIAL_STATE__?.isLogin===true;
- const playableDuration=Math.min(duration,previewSeconds===null?(fullLoginConfirmed?duration:30):previewSeconds);
- if(!Number.isFinite(playableDuration)||playableDuration<=0||video.currentTime>=playableDuration)return no("PREVIEW_END","当前时刻已超出页面允许识别的片段。");
+ const playableDuration=Math.min(duration,previewSeconds??duration);
+ if(!Number.isFinite(playableDuration)||playableDuration<=0)return no("PREVIEW_UNKNOWN","无法确认可播放范围。");
  const validUrl=(value:unknown)=>{
   if(typeof value!=="string"||value.length>8192)return false;
   try{const x=new URL(value);return x.protocol==="https:"&&!x.username&&!x.password&&!x.port&&(x.hostname==="upos-hz-mirrorakam.akamaized.net"||["bilivideo.com","bilivideo.cn"].some(h=>x.hostname===h||x.hostname.endsWith("."+h)))&&new RegExp("^/upgcxcode/\\d+/\\d+/"+cid+"/"+cid+"-[^/]+\\.m4s$").test(x.pathname)}catch{return false}
@@ -47,7 +48,7 @@ export function readNativeStudyPage(){
   const list=vd.subtitle?.list,present=Array.isArray(list),ja=present?list.filter((t:any)=>/^(?:ai-)?(?:ja|jp)(?:[-_]|$)/i.test(String(t.lan||""))).length:0;
   return {status:"ready",bvid,cid,title:String(vd.title||"").slice(0,512),duration,playableDuration,subtitleListPresent:present,japaneseTrackCount:ja,
    source:{url,backupUrls:[]},binding:{documentId:state.documentId,timeOrigin:state.timeOrigin,routeKey:state.routeKey,routeEpoch:state.routeEpoch,videoGeneration:state.videoGeneration,videoTag:tag,mediaSrc:state.mediaSrc},
-   audit:{exactUrlMatch:true,responseStatus:206,requestStart:entry.startTime,epochStart:state.epochStart,videoEpoch:state.videoEpoch,cidPathMatch:true,previewSeconds,accessScope:previewSeconds!==null?"preview":fullLoginConfirmed?"logged-in-current-player":"initial-window",host:new URL(url).hostname}};
+   audit:{exactUrlMatch:true,responseStatus:206,requestStart:entry.startTime,epochStart:state.epochStart,videoEpoch:state.videoEpoch,cidPathMatch:true,previewSeconds,accessScope:previewSeconds!==null?"preview":released?"continued-playback":"current-player",host:new URL(url).hostname}};
  }
  return no("NO_PLAYED_AUDIO");
 }
