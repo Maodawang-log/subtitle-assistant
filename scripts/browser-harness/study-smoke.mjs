@@ -11,10 +11,14 @@ const fixtureOnly = process.argv.includes("--fixture-only");
 const realOnly = process.argv.includes("--real-only");
 const diagnose = process.argv.includes("--diagnose");
 const inspectPageState = process.argv.includes("--inspect-page-state");
+const auditAssociation = process.argv.includes("--audit-association");
+const nativeE2e = process.argv.includes("--native-e2e");
+const finalDist = process.argv.includes("--final-dist");
+const nativeStaleOnly = process.argv.includes("--native-stale-only");
 const requestedUrl = process.argv.find((arg) => arg.startsWith("--public-url="))?.slice("--public-url=".length);
 const approvedPublicUrls = ["https://www.bilibili.com/video/BV1Qtnt6JEy8/", "https://www.bilibili.com/video/BV1wYAmeqEuV/"];
 if (requestedUrl && !approvedPublicUrls.includes(requestedUrl)) throw new Error("Public URL is outside the explicitly approved pair");
-const out = artifactDir(inspectPageState ? "japanese-study-native-state" : fixtureOnly ? "japanese-study-fixture" : realOnly ? "japanese-study-real-news" : "japanese-study");
+const out = artifactDir(nativeStaleOnly ? "japanese-study-native-stale-2.6.3.2" : nativeE2e ? finalDist ? "japanese-study-native-e2e-final-2.6.3.2" : "japanese-study-native-e2e-2.6.3.2" : auditAssociation ? "japanese-study-audio-association" : inspectPageState ? "japanese-study-native-state" : fixtureOnly ? "japanese-study-fixture" : realOnly ? "japanese-study-real-news" : "japanese-study");
 const wavFile = path.resolve(REPO_ROOT, "..", "..", "local-asr", "tests", "jsut-000.wav");
 await mkdir(tempRoot, { recursive: true });
 // Process-local environment only. os.tmpdir() in launchBrowser now stays on E:.
@@ -60,6 +64,7 @@ try {
   const ext = await worker.evaluate("({id:chrome.runtime.id,version:chrome.runtime.getManifest().version,name:chrome.runtime.getManifest().name,listeners:chrome.runtime.onMessage.hasListeners()})");
   check("study-extension-loaded", ext.name === "BiliScript 日语学习" && worker.handle.url.endsWith("/entry/study-background.js") && ext.listeners, { name: ext.name, version: ext.version });
   evidence.extension = ext;
+  if (nativeE2e || nativeStaleOnly) check("native-version-2.6.3.2", ext.version === "2.6.3.2");
   await page.cdp.send("Page.navigate", { url: `chrome-extension://${ext.id}/study/options.html` });
   await waitFor("study settings page", () => page.cdp.evaluate("document.getElementById('autoStart')!==null"));
   const config = await page.cdp.evaluate("chrome.runtime.sendMessage({type:'study-settings-public'}).then(r=>({ok:r?.ok,autoStart:r?.config?.autoStart,autoTranslate:r?.config?.autoTranslate,configured:r?.config?.configured,asrModel:r?.config?.asrModel}))");
@@ -71,6 +76,34 @@ try {
   log("FIRST MILESTONE: extension/SW/settings verified in isolated E: profile");
 
   if (!fixtureOnly) {
+  const observedRequests = new Map(), observedAudioResponses = [];
+  if (auditAssociation) {
+    await page.cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      const key=()=>{const u=new URL(location.href);return (u.pathname.match(/\\/video\\/(BV[0-9A-Za-z]+)/)?.[1]||'')+':'+(u.searchParams.get('p')||1)};
+      const audit=window.__studyAssociationAudit={documentId:crypto.randomUUID(),timeOrigin:performance.timeOrigin,routeEpoch:0,routeKey:key()};
+      const update=()=>{const next=key();if(next!==audit.routeKey){audit.routeEpoch++;audit.routeKey=next}};
+      for(const name of ['pushState','replaceState']){const original=history[name];history[name]=function(...args){const result=original.apply(this,args);update();return result}}
+      addEventListener('popstate',update);
+    })()` });
+    page.cdp.on("Network.requestWillBeSent", (event) => {
+      // Full URLs remain in this process's volatile memory solely for equality.
+      // Neither this map nor candidate URLs are ever passed to writeEvidence/log.
+      try {
+        const u = new URL(event.request.url);
+        if (["bilivideo.com", "bilivideo.cn"].some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`))) {
+          const document = new URL(event.documentURL);
+          observedRequests.set(event.requestId, { url: event.request.url, loaderId: event.loaderId, frameId: event.frameId,
+            documentRouteKey: (document.pathname.match(/\/video\/(BV[0-9A-Za-z]+)/)?.[1] || "") + ":" + (document.searchParams.get("p") || 1),
+            timestamp: event.timestamp, wallTime: event.wallTime });
+        }
+      } catch {}
+    });
+    page.cdp.on("Network.responseReceived", (event) => {
+      const request = observedRequests.get(event.requestId);
+      if (request && event.response.status === 206) observedAudioResponses.push({ ...request, responseUrl: event.response.url,
+        responseLoaderId: event.loaderId, status: event.response.status, mimeType: event.response.mimeType, timestamp: event.timestamp });
+    });
+  }
   if (diagnose) {
     await worker.evaluate(`(() => {
       globalThis.__studyHarnessScripting=[];
@@ -92,12 +125,37 @@ try {
   }
   const realWindows = [];
   const realWorker = worker.handle;
+  const localResponseIds = new Map(), localResponses = [];
+  if (nativeE2e) {
+    await worker.evaluate(`(() => {
+      globalThis.__studyHarnessStopCounts={stopAi:0,cancelWindow:0};
+      chrome.runtime.onMessage.addListener(message=>{if(message?.type==='study-stop-ai')globalThis.__studyHarnessStopCounts.stopAi++;
+        if(message?.type==='study-local-asr'&&message.action==='cancel')globalThis.__studyHarnessStopCounts.cancelWindow++;});
+      return true;
+    })()`);
+    await realWorker.cdp.send("Network.enable", {}, realWorker.sessionId);
+    realWorker.cdp.on("Network.responseReceived", (event, eventSessionId) => {
+      if ((eventSessionId || null) !== (realWorker.sessionId || null)) return;
+      try { const u = new URL(event.response.url); if (u.origin === "http://127.0.0.1:18766" && u.pathname === "/v1/audio/window")
+        localResponseIds.set(event.requestId, { status: event.response.status }); } catch {}
+    });
+    realWorker.cdp.on("Network.loadingFinished", async (event, eventSessionId) => {
+      if ((eventSessionId || null) !== (realWorker.sessionId || null) || !localResponseIds.has(event.requestId)) return;
+      try {
+        const result = await realWorker.cdp.send("Network.getResponseBody", { requestId: event.requestId }, realWorker.sessionId);
+        const raw = JSON.parse(result.base64Encoded ? Buffer.from(result.body, "base64").toString("utf8") : result.body);
+        const segments = Array.isArray(raw.segments) ? raw.segments.map((row) => ({ start: row.start, end: row.end, text: row.text })) : [];
+        localResponses.push({ ...localResponseIds.get(event.requestId), timestampOrigin: raw.timestamp_origin,
+          segments, segmentCount: segments.length, errorCode: raw.error?.code });
+      } catch (error) { localResponses.push({ ...localResponseIds.get(event.requestId), bodyReadError: safeError(error) }); }
+    });
+  }
   realWorker.cdp.on("Fetch.requestPaused", async (event, eventSessionId) => {
     if ((eventSessionId || null) !== (realWorker.sessionId || null)) return;
     try {
       const body = JSON.parse(event.request.postData || "{}");
       const allowed = Number(body.start) < 30;
-      realWindows.push({ start: body.start, duration: body.duration, bvid: body.bvid, cid: body.cid, language: body.language, model: body.model, forwardedToService: allowed });
+      realWindows.push({ start: body.start, duration: body.duration, language: body.language, model: body.model, forwardedToService: allowed });
       if (!allowed) {
         // This public page advertises a 30s anonymous preview. Stop at that
         // boundary before the local service can fetch any later audio window.
@@ -122,7 +180,54 @@ try {
     excerpt:document.body?.innerText?.slice(0,300),videoCount:document.querySelectorAll('video').length,
     media:(()=>{const v=document.querySelector('video');return v?{duration:v.duration,currentTime:v.currentTime,paused:v.paused,readyState:v.readyState}:null})(),study:(${domState})})`);
   evidence.realPublicPage = { ...realState, responses, authenticatedProfileUsed: false, fixture: false };
-  if (inspectPageState) {
+  if (nativeStaleOnly) {
+    const nativeSnapshot = () => worker.evaluate(`(async () => {
+      const tabs=await chrome.tabs.query({});const tab=tabs.find(t=>t.url&&t.url.includes('/video/BV1wYAmeqEuV/'));
+      if(!tab?.id)return {status:'unavailable',reason:'HARNESS_TAB'};
+      const result=await chrome.scripting.executeScript({target:{tabId:tab.id},world:'ISOLATED',func:async()=>{
+        const r=await chrome.runtime.sendMessage({type:'study-native-source'});
+        return r?.status==='ready'?{status:r.status,subtitleListPresent:r.subtitleListPresent,japaneseTrackCount:r.japaneseTrackCount,
+          duration:r.duration,playableDuration:r.playableDuration,binding:{routeEpoch:r.binding?.routeEpoch,videoGeneration:r.binding?.videoGeneration},
+          audit:{requestStart:r.audit?.requestStart,epochStart:r.audit?.epochStart,videoEpoch:r.audit?.videoEpoch,responseStatus:r.audit?.responseStatus}}:
+          {status:r?.status,reason:r?.reason,message:r?.message};
+      }});return result[0]?.result;
+    })()`);
+    const markerSnapshot = () => page.cdp.evaluate(`(() => {
+      const s=window.__BILISCRIPT_STUDY_ROUTE_V2__,audio=window.__playinfo__?.data?.dash?.audio||[];
+      const urls=audio.flatMap(t=>[t.baseUrl,t.base_url,...(Array.isArray(t.backupUrl)?t.backupUrl:[]),...(Array.isArray(t.backup_url)?t.backup_url:[])]).filter(x=>typeof x==='string');
+      const entries=performance.getEntriesByType('resource').filter(r=>urls.includes(r.name)&&r.responseStatus===206);
+      return {routeEpoch:s?.routeEpoch,epochStart:s?.epochStart,videoGeneration:s?.videoGeneration,videoEpoch:s?.videoEpoch,
+        pageIndex:Number(new URL(location.href).searchParams.get('p')||1),candidate206Count:entries.length,
+        candidate206AfterEpochCount:entries.filter(e=>e.startTime>=s.epochStart).length,
+        latestCandidate206Start:entries.length?Math.max(...entries.map(e=>e.startTime)):null};
+    })()`);
+    const baseline = await nativeSnapshot(), baselineMarker = await markerSnapshot();
+    check("native-stale-baseline-ready", baseline?.status === "ready", { baseline, marker: baselineMarker });
+    if (baseline?.status !== "ready") throw new Error("Native baseline not ready; synthetic route test cannot start");
+    const blockedAudio = [];
+    page.cdp.on("Fetch.requestPaused", async ({ requestId }) => {
+      blockedAudio.push({ interceptedDuringSyntheticRouteTest: true });
+      await page.cdp.send("Fetch.failRequest", { requestId, errorReason: "Aborted" }).catch(() => {});
+    });
+    await page.cdp.send("Fetch.enable", { patterns: [{ urlPattern: "https://*.bilivideo.com/*" }, { urlPattern: "https://*.bilivideo.cn/*" }, { urlPattern: "https://upos-hz-mirrorakam.akamaized.net/*" }] });
+    // Explicit synthetic history-only A -> B -> A. No network navigation or
+    // different video is requested, and CDN requests are blocked before transfer.
+    await page.cdp.evaluate("(()=>{const u=new URL(location.href);u.searchParams.set('p','2');history.pushState({syntheticStudyAcceptance:true},'',u);})()");
+    const atB = await nativeSnapshot(), markerB = await markerSnapshot();
+    check("synthetic-P2-rejects-old-CID", atB?.status === "unavailable" && atB.reason === "CID" && markerB.routeEpoch > baselineMarker.routeEpoch,
+      { native: atB, marker: markerB });
+    await page.cdp.evaluate("(()=>{const u=new URL(location.href);u.searchParams.delete('p');history.pushState({syntheticStudyAcceptance:true},'',u);})()");
+    const backAtA = await nativeSnapshot(), markerA2 = await markerSnapshot();
+    check("synthetic-A-B-A-rejects-stale-performance", backAtA?.status === "unavailable" && backAtA.reason === "NO_PLAYED_AUDIO" &&
+      markerA2.routeEpoch > markerB.routeEpoch && markerA2.candidate206AfterEpochCount === 0 && markerA2.latestCandidate206Start < markerA2.epochStart,
+      { native: backAtA, marker: markerA2 });
+    evidence.syntheticRouteStale = { synthetic: true, method: "history.pushState only; same BV; P1 -> P2 -> P1", audioFetchBlockedBeforeTransfer: true,
+      baseline, baselineMarker, atB, markerB, backAtA, markerA2, blockedAudioAttempts: blockedAudio.length,
+      learnedOrTranscribed: false, anotherVideoVisited: false };
+    await snap("02-synthetic-route-stale-rejected");
+    await page.cdp.send("Fetch.disable");
+  }
+  if (inspectPageState || auditAssociation) {
     evidence.nativePageState = await page.cdp.evaluate(`(() => {
       const currentBvid=location.pathname.match(/\\/video\\/(BV[0-9A-Za-z]+)/)?.[1]||'',p=Number(new URL(location.href).searchParams.get('p')||1);
       const state=window.__INITIAL_STATE__,v=state?.videoData,play=window.__playinfo__,d=play?.data;
@@ -145,8 +250,96 @@ try {
     })()`);
     await snap("02-native-page-state-read-only");
   }
+  if (auditAssociation) {
+    const frame = (await page.cdp.send("Page.getFrameTree")).frameTree.frame;
+    const before = await page.cdp.evaluate("({...window.__studyAssociationAudit})");
+    // Private transport object: contains candidate URLs in memory only. Project
+    // every persisted field explicitly below; do not attach this object to evidence.
+    const transient = await page.cdp.evaluate(`(() => {
+      const v=window.__INITIAL_STATE__?.videoData,d=window.__playinfo__?.data,u=new URL(location.href),p=Number(u.searchParams.get('p')||1);
+      const page=Array.isArray(v?.pages)?v.pages.find(x=>Number(x.page)===p):null,cid=String(page?.cid||(p===1?v?.cid:'')||'');
+      const resources=performance.getEntriesByType('resource');
+      const candidates=(Array.isArray(d?.dash?.audio)?d.dash.audio:[]).map((t,index)=>({index,
+        urls:[t.baseUrl,t.base_url,...(Array.isArray(t.backupUrl)?t.backupUrl:[]),...(Array.isArray(t.backup_url)?t.backup_url:[])].filter(x=>typeof x==='string'),
+        bandwidth:typeof t.bandwidth==='number'?t.bandwidth:null}));
+      const video=document.querySelector('video'),media=video?{sourceKind:video.currentSrc.startsWith('blob:')?'blob':video.currentSrc.startsWith('http')?'http':video.currentSrc?'other':'empty',
+        currentTime:video.currentTime,duration:video.duration,paused:video.paused,readyState:video.readyState,
+        buffered:Array.from({length:video.buffered.length},(_,i)=>[video.buffered.start(i),video.buffered.end(i)]),
+        seekable:Array.from({length:video.seekable.length},(_,i)=>[video.seekable.start(i),video.seekable.end(i)])}:null;
+      const text=document.body?.innerText||'',preview=text.match(/试看\\s*(\\d+)\\s*秒/);
+      const selector=e=>e.tagName.toLowerCase()+(e.id?'#'+CSS.escape(e.id):[...e.classList].map(c=>'.'+CSS.escape(c)).join(''));
+      const previewDom=[...document.querySelectorAll('*')].filter(e=>e.childElementCount===0&&/试看\\s*\\d+\\s*秒/.test(e.textContent||'')).map(e=>{
+        const r=e.getBoundingClientRect(),host=e.closest('.bpx-player-container'),ancestors=[];let n=e;
+        for(let i=0;n&&i<5;i++,n=n.parentElement)ancestors.push(selector(n));
+        return {selector:selector(e),parentSelector:e.parentElement?selector(e.parentElement):null,text:e.textContent.trim().slice(0,80),
+          parentText:e.parentElement?.textContent?.trim().slice(0,160),insideBpxPlayerContainer:!!host,visible:r.width>0&&r.height>0&&getComputedStyle(e).visibility!=='hidden',
+          rectangle:{width:r.width,height:r.height},ancestors}});
+      const previewFields=[];const scan=(obj,loc,depth)=>{if(!obj||typeof obj!=='object'||depth>3)return;for(const [key,value] of Object.entries(obj)){
+        if(['dash','durl','audio','video','backupUrl','backup_url','baseUrl','base_url'].includes(key))continue;
+        if(/preview|trial|watch_time|limit|timelength|duration/i.test(key)&&['number','boolean'].includes(typeof value))previewFields.push({field:loc+'.'+key,value});
+        else if(value&&typeof value==='object'&&!Array.isArray(value))scan(value,loc+'.'+key,depth+1)}};
+      scan(d,'playinfo.data',0);scan(v?.rights,'videoData.rights',0);
+      return {routeKey:(u.pathname.match(/\\/video\\/(BV[0-9A-Za-z]+)/)?.[1]||'')+':'+p,cid,bvidMatches:v?.bvid===u.pathname.match(/\\/video\\/(BV[0-9A-Za-z]+)/)?.[1],
+        candidates,resources:resources.map(r=>({name:r.name,startTime:r.startTime,duration:r.duration,responseEnd:r.responseEnd,initiatorType:r.initiatorType,
+          responseStatusAvailable:'responseStatus' in r,responseStatus:typeof r.responseStatus==='number'?r.responseStatus:null})),
+        media,declaredPreviewSeconds:preview?Number(preview[1]):null,loginRequiredMessagePresent:/请先登录|登录.*试看|试看.*登录/.test(text),previewFields,previewDom,
+        audit:{...window.__studyAssociationAudit},performanceTimeOrigin:performance.timeOrigin};
+    })()`);
+    const sameDocument = before.documentId === transient.audit?.documentId && before.timeOrigin === transient.performanceTimeOrigin;
+    const sameRoute = before.routeKey === transient.routeKey && before.routeEpoch === transient.audit?.routeEpoch;
+    const pathCid = (url) => {
+      try { const match = new URL(url).pathname.match(/\/upgcxcode\/[^/]+\/[^/]+\/(\d+)\/(\d+)-/); return match && match[1] === match[2] ? match[1] : null; }
+      catch { return null; }
+    };
+    const tracks = transient.candidates.map((candidate) => {
+      const urls = [...new Set(candidate.urls)];
+      const performanceMatches = transient.resources.filter((resource) => urls.includes(resource.name) && resource.startTime >= 0);
+      const anyNetworkMatches = observedAudioResponses.filter((response) => urls.includes(response.responseUrl));
+      const networkMatches = observedAudioResponses.filter((response) => urls.includes(response.responseUrl) && response.loaderId === frame.loaderId &&
+        response.responseLoaderId === frame.loaderId && response.frameId === frame.id && response.documentRouteKey === transient.routeKey);
+      return { candidateIndex: candidate.index, bandwidth: candidate.bandwidth, distinctUrlCount: urls.length,
+        allUrlPathsCarrySelectedCid: urls.length > 0 && urls.every((url) => pathCid(url) === transient.cid),
+        exactPerformanceUrlMatchCount: performanceMatches.length, exactSameDocument206UrlMatchCount: networkMatches.length,
+        exactPerformance206MatchCount: performanceMatches.filter((entry) => entry.responseStatusAvailable && entry.responseStatus === 206).length,
+        exactPerformanceEntrySamples: performanceMatches.slice(0,8).map(({startTime,duration,responseEnd,initiatorType,responseStatusAvailable,responseStatus})=>({startTime,duration,responseEnd,initiatorType,responseStatusAvailable,responseStatus})),
+        exact206UrlMatchCount: anyNetworkMatches.length,
+        exact206CurrentRequestLoaderMatchCount: anyNetworkMatches.filter((response) => response.loaderId === frame.loaderId).length,
+        exact206CurrentResponseLoaderMatchCount: anyNetworkMatches.filter((response) => response.responseLoaderId === frame.loaderId).length,
+        exact206CurrentMainFrameMatchCount: anyNetworkMatches.filter((response) => response.frameId === frame.id).length,
+        exact206CurrentRouteMatchCount: anyNetworkMatches.filter((response) => response.documentRouteKey === transient.routeKey).length,
+        exact206WithinDocumentWallTimeCount: anyNetworkMatches.filter((response) => response.wallTime * 1000 >= transient.performanceTimeOrigin).length,
+        exact206EmptyRequestLoaderCount: anyNetworkMatches.filter((response) => !response.loaderId).length,
+        exact206EmptyResponseLoaderCount: anyNetworkMatches.filter((response) => !response.responseLoaderId).length,
+        exact206MimeTypes: [...new Set(anyNetworkMatches.map((response) => response.mimeType))],
+        exactSameDocumentRequestUrlMatchCount: networkMatches.filter((response) => urls.includes(response.url)).length,
+        performanceMatchesWithinDocumentLifetime: performanceMatches.every((entry) => entry.startTime >= 0),
+        requestWallTimesWithinDocumentLifetime: networkMatches.every((entry) => entry.wallTime * 1000 >= transient.performanceTimeOrigin),
+        observed206MimeTypes: [...new Set(networkMatches.map((response) => response.mimeType))],
+        linkedByBothPerformanceAndCurrentDocument206: performanceMatches.length > 0 && networkMatches.length > 0 };
+    });
+    evidence.audioAssociationAudit = { readOnly: true, learnedOrTranscribed: false, currentBvidMatchesNativeMetadata: transient.bvidMatches,
+      currentPageCidPresent: !!transient.cid, documentStable: sameDocument, routeEpochStable: sameRoute, routeEpoch: transient.audit?.routeEpoch,
+      timeOriginMatchesDocumentMarker: transient.performanceTimeOrigin === transient.audit?.timeOrigin,
+      candidateTrackCount: tracks.length, tracks, media: transient.media, declaredPreviewSeconds: transient.declaredPreviewSeconds,
+      loginRequiredMessagePresent: transient.loginRequiredMessagePresent, previewFields: transient.previewFields,
+      previewDom: transient.previewDom,
+      observedPlayedTimeWithinDeclaredPreview: transient.declaredPreviewSeconds === null ? null : transient.media?.currentTime <= transient.declaredPreviewSeconds,
+      safeTestWindowEnd: transient.declaredPreviewSeconds === null ? null : Math.min(30, transient.declaredPreviewSeconds),
+      independentlyVerifiedPlayinfoIdentityFields: false,
+      strongAssociationCandidateCount: tracks.filter((track) => transient.bvidMatches && sameDocument && sameRoute && track.allUrlPathsCarrySelectedCid &&
+        track.linkedByBothPerformanceAndCurrentDocument206 && track.requestWallTimesWithinDocumentLifetime).length,
+      performanceAndFresh206AssociationCandidateCount: tracks.filter((track) => transient.bvidMatches && sameDocument && sameRoute && track.allUrlPathsCarrySelectedCid &&
+        track.exactPerformanceUrlMatchCount > 0 && track.exact206WithinDocumentWallTimeCount > 0).length,
+      performance206AssociationCandidateCount: tracks.filter((track) => transient.bvidMatches && sameDocument && sameRoute && track.allUrlPathsCarrySelectedCid &&
+        track.exactPerformance206MatchCount > 0).length,
+      limitations: ["No seek or playback beyond the displayed anonymous preview was attempted.", "Buffered/seekable duration does not authorize content beyond the UI preview.", "This read-only observation does not test SPA stale-object rejection or signed URL expiry."] };
+    check("current-document-performance206-association", evidence.audioAssociationAudit.performance206AssociationCandidateCount > 0,
+      { candidates: tracks.length, strictLoaderLinkedCandidates: evidence.audioAssociationAudit.strongAssociationCandidateCount,
+        performance206LinkedCandidates: evidence.audioAssociationAudit.performance206AssociationCandidateCount, declaredPreviewSeconds: transient.declaredPreviewSeconds });
+    await snap("03-audio-association-read-only");
+  }
   if (realState.videoCount) check("real-playable-page-content-script", realState.study?.host, { path: realState.path, duration: realState.media?.duration });
-  if (realState.study?.host && !inspectPageState) {
+  if (realState.study?.host && !inspectPageState && !auditAssociation && !nativeStaleOnly) {
     check("real-page-learning-default-off", realState.study.enable === "开启学习" && !realState.study.overlay, realState.study);
     await click("#show");
     await waitFor("real first-window result or explicit failure", async () => {
@@ -154,9 +347,20 @@ try {
       return state.overlay || /失败|未启动|无法|风控/.test(state.status || "");
     }, { timeoutMs: 25000, intervalMs: 300 }).catch((error) => { evidence.realPublicPage.waitError = safeError(error); });
     await pause();
+    if (nativeE2e) await sleep(300);
     evidence.realPublicPage.enabled = await page.cdp.evaluate(`({study:(${domState}),source:document.getElementById('biliscript-japanese-study')?.shadowRoot?.getElementById('source')?.textContent,
       rows:[...document.getElementById('biliscript-japanese-study')?.shadowRoot?.querySelectorAll('.cue')||[]].slice(0,5).map(e=>e.textContent)})`);
     evidence.realPublicPage.localWindows = realWindows;
+    if (nativeE2e) {
+      evidence.realPublicPage.localResponses = localResponses;
+      evidence.realPublicPage.nativeEpoch = await page.cdp.evaluate(`(() => {const s=window.__BILISCRIPT_STUDY_ROUTE_V2__;return s?{
+        version:s.version,routeEpoch:s.routeEpoch,epochStart:s.epochStart,videoGeneration:s.videoGeneration,videoEpoch:s.videoEpoch,
+        active:s.active,previewLimit:s.previewLimit,previewUnknown:s.previewUnknown,videoConnected:!!s.video?.isConnected,videoBindingTagPresent:!!s.video?.getAttribute('data-biliscript-study-binding'),
+        sourceKind:s.mediaSrc?.startsWith('blob:')?'blob':s.mediaSrc?'other':'empty'}:null})()`);
+      check("real-native-30s-Japanese-segments", localResponses.some((r) => r.status === 200 && r.timestampOrigin === "absolute" &&
+        r.segments?.length > 0 && r.segments.every((s) => s.start >= 0 && s.end <= 30) && r.segments.some((s) => /[\u3040-\u30ff\u4e00-\u9fff]/.test(s.text || ""))),
+        { windows: realWindows.length, responses: localResponses.map((r) => ({ status: r.status, segmentCount: r.segmentCount, errorCode: r.errorCode })) });
+    }
     if (diagnose) {
       evidence.realPublicPage.apiDiagnostics = await page.cdp.evaluate("window.__studyHarnessApi || []");
       evidence.realPublicPage.scriptingDiagnostics = await worker.evaluate("globalThis.__studyHarnessScripting || []");
@@ -166,7 +370,21 @@ try {
     check("real-preview-boundary-respected", realWindows.filter((w) => w.forwardedToService).every((w) => w.start >= 0 && w.start + w.duration <= 30), realWindows);
     await snap("02-real-public-page");
     await click("#enable"); await pause();
-  } else if (!inspectPageState) {
+    if (nativeE2e) {
+      await sleep(600);
+      const closed = await page.cdp.evaluate(domState);
+      const stopMessages = await worker.evaluate("({...globalThis.__studyHarnessStopCounts})");
+      evidence.realPublicPage.closed = { study: closed, stopMessages,
+        windowRequestCountAfterClose: realWindows.length, finishedResponseCount: localResponses.filter((r) => r.status === 200 && r.segmentCount > 0).length,
+        noInFlightWindowAtClose: localResponses.filter((r) => r.status === 200 && r.segmentCount > 0).length === realWindows.filter((w) => w.forwardedToService).length };
+      check("real-native-overlay-visible", evidence.realPublicPage.enabled.study.overlay === true);
+      check("real-close-clears-overlay-and-stops", closed.enable === "开启学习" && closed.overlay === false && stopMessages.stopAi >= 2,
+        { enable: closed.enable, overlay: closed.overlay, stopMessages });
+      check("real-only-one-preview-window", realWindows.length === 1 && realWindows[0].start === 0 && realWindows[0].duration === 30,
+        { windows: realWindows.length, responses: localResponses.length });
+      await snap("03-real-stopped");
+    }
+  } else if (!inspectPageState && !auditAssociation && !nativeStaleOnly) {
     log("Real public page blocked or content script unavailable; no security bypass attempted");
     await snap("02-real-public-page-blocked");
   }

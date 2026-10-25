@@ -1,6 +1,7 @@
 // @ts-nocheck
 // Independent opt-in study entry. The upstream automatic summary/prefetch entry is not started.
 import "./local-proxy.bg.js";
+import "./native-source.bg.js";
 const SETTINGS="biliscriptJapaneseSettings", CACHE="biliscriptJapaneseAiCache";
 const DEFAULTS={autoStart:false,autoTranslate:true,asrModel:"small",baseUrl:"https://api.deepseek.com",model:"deepseek-v4-flash",apiKey:""};
 const running=new Map();let cacheWrite=Promise.resolve();

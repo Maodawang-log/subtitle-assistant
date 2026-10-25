@@ -1,7 +1,8 @@
 // @ts-nocheck
 // Opt-in Japanese learning shell. Upstream automatic content entry is not loaded.
 import { getJapaneseCc } from "./cc-source.js";
-import { createBoundedAsrController } from "./bounded-asr.js";
+import { createBoundedAsrController, requestStudyAudioWindow } from "./bounded-asr.js";
+import { getNativeStudySource, sameNativeBinding } from "./native-source.js";
 (()=>{
  if(document.getElementById("biliscript-japanese-study"))return;
  const host=document.createElement("div");host.id="biliscript-japanese-study";
@@ -14,7 +15,7 @@ import { createBoundedAsrController } from "./bounded-asr.js";
  let enabled=false,generation=0,route="",identity="",clip=null,cues=[],chinese=[],selected=0,active=-1,offset=0,video=null,player=null,abort=null,settings={autoStart:false,autoTranslate:true,configured:false};
  let tokenizer=null,tokenPromise=null,words={},basic={},overlay=null,overlayRoot=null,overlaySignature="",panelText="",loading=false,aiBusy=false,automaticBusy=false,waiting=false,resumeAfter=false,asrMode=false,lookupId="";
  const translations=new Map(),attempted=new Set();
- let recognizedWindows=[],asrError=false,aiEpoch=0,automaticFailed=false;
+ let recognizedWindows=[],asrError=false,aiEpoch=0,automaticFailed=false,nativeMode=false,nativeSession=null,nativeSeekEpoch=0;
  const windowReady=time=>recognizedWindows.some(w=>time>=w.start&&time<w.end);
  const status=(text,error=false)=>{$("status").textContent=text;$("status").classList.toggle("error",error)};
  const currentRoute=()=>JSTUDY.keyOf(JSTUDY.resource(location.href));
@@ -23,10 +24,37 @@ import { createBoundedAsrController } from "./bounded-asr.js";
  function loopOff(){player?.clear();$("loop").textContent="循环：关";$("loop").classList.remove("on");$("loop").setAttribute("aria-pressed","false")}
  function guard(){if(!enabled)throw new Error("请先开启当前视频的学习");if(!cues.length)throw new Error("当前时刻字幕尚未就绪，请等待本地识别或导入字幕");if(!video)throw new Error("找不到视频播放器");return cues[selected]}
  const shifted=c=>({...c,start:Math.max(0,c.start+offset),end:Math.max(.01,c.end+offset)});
+ function nativeLive(n){return enabled&&currentRoute()===route&&n&&n.binding.routeKey===route&&video?.isConnected&&video.getAttribute("data-biliscript-study-binding")===n.binding.videoTag&&video.currentSrc===n.binding.mediaSrc}
+ async function verifyNativeWindow(payload,signal,expected){
+  if(signal.aborted||!nativeLive(expected)||nativeSession!==expected)throw new DOMException("播放资源已更新","AbortError");
+  const fresh=await getNativeStudySource();
+  if(signal.aborted||!nativeLive(expected)||nativeSession!==expected)throw new DOMException("播放资源已更新","AbortError");
+  if(fresh.status!=="ready"||!sameNativeBinding(fresh.binding,expected.binding)||fresh.bvid!==payload.bvid||fresh.cid!==payload.cid||fresh.source.url!==payload.audio_url||payload.start+payload.duration>fresh.playableDuration)throw new Error("当前音轨关联或可播放范围已改变，请重新开启学习。");
+ }
+ function startNative(n){
+  nativeMode=true;nativeSession=n;nativeSeekEpoch++;clip={bvid:n.bvid,cid:n.cid,title:n.title};identity=n.bvid+":"+n.cid;cues=[];chinese=[];selected=0;active=-1;recognizedWindows=[];asrError=false;asrMode=true;
+  $("source").textContent="当前播放器实际音轨 · "+n.title+(n.audit.previewSeconds!==null?" · 仅页面试看"+n.playableDuration+"秒":n.audit.accessScope==="initial-window"?" · 未确认整片可播，仅识别前"+n.playableDuration+"秒":"");
+  waitForCurrent();
+  asr.start({enabled:true,bvid:n.bvid,cid:n.cid,currentTime:video?.currentTime||0,duration:n.duration,language:"ja",model:settings.asrModel||"small",resourceId:identity,validatedAudioSource:n.source,playableDuration:n.playableDuration});
+ }
+ async function nativeSeek(){
+  const seekId=++nativeSeekEpoch,mine=generation;asr.stop();nativeSession=null;recognizedWindows=[];asrError=false;waitForCurrent();
+  const fresh=await getNativeStudySource();
+  if(!enabled||!nativeMode||mine!==generation||seekId!==nativeSeekEpoch||currentRoute()!==route)return;
+  if(fresh.status!=="ready"||fresh.bvid+":"+fresh.cid!==identity||!nativeLive(fresh)){waiting=false;resumeAfter=false;asrError=true;status(fresh.message||"跳转后音轨尚未重新关联，请播放几秒后重新开启学习。",true);return;}
+  startNative(fresh);
+ }
  const asr=createBoundedAsrController({
+  async requestWindow(payload,signal){
+   const expected=nativeSession;
+   if(nativeMode){if(!expected)throw new DOMException("正在重验音轨","AbortError");await verifyNativeWindow(payload,signal,expected);}
+   const result=await requestStudyAudioWindow(payload,signal);
+   if(expected)await verifyNativeWindow(payload,signal,expected);
+   return result;
+  },
   onCues(items,meta){
    if(currentRoute()!==route){reset(currentRoute());return;}
-   if(!enabled||meta.resourceId!==identity)return;
+   if(!enabled||meta.resourceId!==identity||nativeMode&&!nativeLive(nativeSession))return;
    recognizedWindows.push({start:meta.windowStart,end:meta.windowStart+meta.duration});
    const combined=[...cues,...JSTUDY.normalize(items)],unique=new Map();
    combined.forEach(c=>unique.set(cueKey(c),c));cues=[...unique.values()].sort((a,b)=>a.start-b.start);
@@ -36,7 +64,7 @@ import { createBoundedAsrController } from "./bounded-asr.js";
     if(resumeAfter){resumeAfter=false;video.play().catch(()=>status("字幕已就绪，请点视频播放。"))}
    }
   },
-  onStatus(event){if(currentRoute()!==route){reset(currentRoute());return;}if(!enabled)return;if(event.phase==="error"){asrError=true;waiting=false;resumeAfter=false;status(event.message,true)}else if(event.phase!=="disabled")status(event.message)}
+  onStatus(event){if(currentRoute()!==route){reset(currentRoute());return;}if(!enabled)return;if(event.phase==="error"){if(nativeMode)asr.stop();asrError=true;waiting=false;resumeAfter=false;status(event.message,true)}else if(event.phase!=="disabled")status(event.message)}
  });
  function bindVideo(){
   const list=[...document.querySelectorAll("video")].map(v=>({v,r:v.getBoundingClientRect()})).filter(x=>x.r.width>50&&x.r.height>50).sort((a,b)=>b.r.width*b.r.height-a.r.width*a.r.height);
@@ -48,17 +76,21 @@ import { createBoundedAsrController } from "./bounded-asr.js";
    const owned=v.__biliscriptOwnedSeek;
    if(owned&&owned.until>=Date.now()&&Math.abs(v.currentTime-owned.time)<.4){updateAtTime(true);return;}
    aiEpoch++;automaticBusy=false;send({type:"study-stop-ai"}).catch(()=>{});
-   loopOff();active=-1;if(asrMode){asrError=false;asr.seek(v.currentTime);waitForCurrent()}updateAtTime(true);
+   loopOff();active=-1;if(asrMode){asrError=false;if(nativeMode)safe(nativeSeek);else asr.seek(v.currentTime);waitForCurrent()}updateAtTime(true);
   });
  }
  function waitForCurrent(){
-  if(!video||video.ended||windowReady(video.currentTime)||asrError)return;
+  if(!video||video.ended||asrError)return;
+  if(nativeMode&&nativeSession&&video.currentTime>=nativeSession.playableDuration){
+   waiting=false;resumeAfter=false;asrError=true;asr.stop();clearOverlay();status("已到当前页面允许的识别范围（前"+nativeSession.playableDuration+"秒）。可继续原视频播放，跳回允许范围后重新练习。");return;
+  }
+  if(windowReady(video.currentTime))return;
   if(!waiting)resumeAfter=!video.paused;waiting=true;video.pause();
   $("current").textContent="当前时刻字幕准备中…";$("chinese").textContent="";clearOverlay();status("正在准备当前30秒片段。起播/跳转需要等待，不会把缓冲进度当成音频。");
  }
  function clearOverlay(){overlay?.remove();overlay=null;overlayRoot=null;overlaySignature=""}
  function stop(reason="学习已关闭。字幕、音频和后续翻译任务已停止。"){
-  enabled=false;generation++;aiEpoch++;abort?.abort();abort=null;asr.stop();send({type:"study-stop-ai"}).catch(()=>{});loopOff();waiting=false;resumeAfter=false;asrMode=false;recognizedWindows=[];asrError=false;automaticFailed=false;loading=false;aiBusy=false;automaticBusy=false;
+  enabled=false;generation++;aiEpoch++;nativeMode=false;nativeSession=null;nativeSeekEpoch++;abort?.abort();abort=null;asr.stop();send({type:"study-stop-ai"}).catch(()=>{});loopOff();waiting=false;resumeAfter=false;asrMode=false;recognizedWindows=[];asrError=false;automaticFailed=false;loading=false;aiBusy=false;automaticBusy=false;
   clearOverlay();$("enable").textContent="开启学习";$("show").textContent="开始日语学习";$("enable").classList.remove("on");status(reason);
  }
  function reset(next){
@@ -71,11 +103,17 @@ import { createBoundedAsrController } from "./bounded-asr.js";
   stop();enabled=true;const mine=++generation;abort=new AbortController();loading=true;
   $("enable").textContent="停止学习";$("enable").classList.add("on");$("show").textContent="学习中 · 展开";wrap.classList.remove("fold");bindVideo();
   status("学习已开启，正在获取当前视频的日文字幕…");
+  let nativeFallback=null;
   try{
    const publicSettings=await send({type:"study-settings-public"});if(mine!==generation||!enabled)return;settings={...settings,...publicSettings?.config};
    const savedKey="biliscript-study-import:"+route;
    const saved=(await chrome.storage.local.get(savedKey))[savedKey];if(mine!==generation||!enabled)return;
    if(saved&&!preferredTrackId){identity=saved.identity||route;cues=JSTUDY.normalize(saved.cues);offset=saved.offset||0;$("offset").value=offset;$("source").textContent="本视频手动导入："+saved.name;updateAtTime(true);status("已恢复本视频导入的日文字幕。");return;}
+   const native=await getNativeStudySource();nativeFallback=native;
+   if(mine!==generation||!enabled||currentRoute()!==route)return;
+   if(!preferredTrackId&&native.status==="ready"&&native.subtitleListPresent&&native.japaneseTrackCount===0&&nativeLive(native)){
+    startNative(native);return;
+   }
    const result=await getJapaneseCc({signal:abort.signal,preferredTrackId,includeChinese:true,onStatus:text=>{if(enabled&&mine===generation)status(text)}});
    if(mine!==generation||!enabled)return;
    clip=result;identity=result.bvid+":"+result.cid;
@@ -85,10 +123,12 @@ import { createBoundedAsrController } from "./bounded-asr.js";
     cues=JSTUDY.normalize(result.cues);chinese=JSTUDY.normalize(result.chineseCues||[]);
     $("source").textContent="B站日文文本轨 · "+result.title;updateAtTime(true);status("日文字幕已就绪，播放器内显示原文及已有中文/按需译文。");
    }else{
+    if(native.status==="ready"&&native.bvid===result.bvid&&native.cid===result.cid&&nativeLive(native)){startNative(native);return;}
+    if(native.status==="unavailable"&&["PREVIEW_END","PREVIEW_UNKNOWN"].includes(native.reason))throw new Error(native.message);
     asrMode=true;$("source").textContent="本地 Whisper · "+result.title;waitForCurrent();
     asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:Number.isFinite(video?.duration)?video.duration:undefined,language:"ja",model:settings.asrModel||"small",resourceId:identity});
    }
-  }catch(e){if(enabled&&mine===generation&&e.name!=="AbortError")status(e.message,true)}
+  }catch(e){if(enabled&&mine===generation&&e.name!=="AbortError")status(nativeFallback?.reason==="NO_PLAYED_AUDIO"?"尚未关联当前音轨。请先正常播放几秒，再点“重新取字幕”。":nativeFallback?.reason==="NO_MARKER"?"请刷新视频页后重新开启学习。":e.message,true)}
   finally{if(mine===generation)loading=false}
  }
  const fmt=t=>Math.floor(t/60)+":"+String(Math.floor(t%60)).padStart(2,"0");
@@ -187,7 +227,7 @@ import { createBoundedAsrController } from "./bounded-asr.js";
  $("subtitleFile").onchange=()=>safe(async()=>{
   const f=$("subtitleFile").files[0];if(!f)return;if(f.size>5*1024*1024)throw new Error("字幕不能超过5MB");const mine=generation;
   const parsed=JSTUDY.parseSubtitle(await f.text());if(!enabled||mine!==generation)return;
-  asr.stop();abort?.abort();asrMode=false;loopOff();cues=parsed;chinese=[];identity=identity||route;translations.clear();attempted.clear();
+  asr.stop();abort?.abort();asrMode=false;nativeMode=false;nativeSession=null;nativeSeekEpoch++;loopOff();cues=parsed;chinese=[];identity=identity||route;translations.clear();attempted.clear();
   await chrome.storage.local.set({["biliscript-study-import:"+route]:{identity,cues,name:f.name,offset}});
   $("source").textContent="手动导入："+f.name;display(0,true);status("已导入真实时间轴日文字幕。");$("subtitleFile").value="";
  });
@@ -213,6 +253,7 @@ import { createBoundedAsrController } from "./bounded-asr.js";
  send({type:"study-settings-public"}).then(r=>{settings={...settings,...r?.config};if(settings.autoStart&&route&&!enabled)safe(()=>start())}).catch(()=>{});
  function sync(){
   const next=currentRoute();if(next!==route)reset(next);host.style.display=next?"block":"none";bindVideo();
+  if(enabled&&nativeMode&&nativeSession&&!nativeLive(nativeSession)){stop("播放器资源已更新，已停止旧音轨任务。请重新开启学习。");return;}
   if(enabled){player?.tick();if(asrMode){asr.updateTime(video?.currentTime||0);if(!waiting&&!asrError)waitForCurrent()}updateAtTime();}
  }
  function frame(){if(enabled&&player?.mode)player.tick();requestAnimationFrame(frame)}

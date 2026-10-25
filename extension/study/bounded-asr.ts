@@ -26,9 +26,20 @@ export interface StudyAsrStart {
   cid: string | number;
   currentTime: number;
   duration?: number;
+  // Only the owner that verified MAIN-page BV/CID and the exact played audio
+  // URL may supply this snapshot. It is session memory, never persisted.
+  validatedAudioSource?: StudyValidatedAudioSource;
+  // Mandatory for a validated snapshot. This is the current playable/preview
+  // limit, not the video's nominal full duration or a buffered time range.
+  playableDuration?: number;
   language?: string;
   model?: string;
   resourceId?: string | number;
+}
+
+export interface StudyValidatedAudioSource {
+  url: string;
+  backupUrls: string[];
 }
 
 export interface StudyAsrCueMeta {
@@ -76,7 +87,7 @@ export interface BoundedAsrOptions {
 export interface BoundedAsrController {
   start(input: StudyAsrStart): void;
   stop(): void;
-  seek(time: number): void;
+  seek(time: number, validatedAudioSource?: StudyValidatedAudioSource): void;
   updateTime(time: number): void;
 }
 
@@ -95,6 +106,7 @@ interface Session {
   currentTime: number;
   duration?: number;
   source?: AudioSource;
+  validatedSource: boolean;
   sourceAbort: AbortController;
   delivered: Set<string>;
   failed: Map<string, string>;
@@ -230,10 +242,12 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     active = undefined;
     previous?.abort.abort();
     previousSession?.sourceAbort.abort();
+    if (previousSession) previousSession.source = undefined;
     status("disabled", "日语学习已关闭");
   }
 
   function desired(owner: Session): WindowSlot[] {
+    if (owner.duration !== undefined && owner.currentTime >= owner.duration) return [];
     const start = Math.floor(owner.currentTime / STUDY_ASR_CHUNK_SECONDS) * STUDY_ASR_CHUNK_SECONDS;
     const end = Math.min(start + STUDY_ASR_AHEAD_SECONDS, owner.duration ?? Infinity);
     const slots: WindowSlot[] = [];
@@ -307,6 +321,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       const failure = current && owner.failed.get(current.key);
       if (failure) status("error", `当前片段识别失败：${failure}。关闭后重新开启可重试。`, owner, current);
       else if (current && cache.has(current.key)) status("ready", "当前播放窗口字幕已准备，等待播放推进", owner, current);
+      else if (owner.duration !== undefined && owner.currentTime >= owner.duration) status("ready", "已到达当前可播放范围，未请求范围外音频", owner);
       else status("waiting", "等待可识别的播放片段", owner);
       return;
     }
@@ -358,7 +373,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     plan(owner);
   }
 
-  function seek(time: number): void {
+  function seek(time: number, validatedAudioSource?: StudyValidatedAudioSource): void {
     const owner = session;
     if (!owner || !Number.isFinite(time)) return;
     owner.currentTime = Math.max(0, time);
@@ -369,7 +384,55 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     // An explicit seek may retry a failed target; ordinary time updates never
     // create an unbounded retry loop while playback is paused.
     for (const slot of desired(owner)) owner.failed.delete(slot.key);
+    if (owner.validatedSource) {
+      // A played-page URL is scoped to the validated playback snapshot. A real
+      // seek cannot silently reuse it or fall back to a previously rejected API.
+      // The UI normally stop()s, revalidates MAIN state, then start()s afresh.
+      owner.source = undefined;
+      owner.sourceAbort.abort();
+      if (validatedAudioSource) acquireSource(owner, validatedAudioSource);
+      else status("error", "播放位置已改变，请重新验证当前可播放音轨", owner);
+      return;
+    }
     plan(owner);
+  }
+
+  function acquireSource(owner: Session, supplied?: StudyValidatedAudioSource): void {
+    owner.sourceAbort.abort();
+    owner.sourceAbort = new AbortController();
+    const attempt = owner.sourceAbort;
+    owner.source = undefined;
+    if (!desired(owner).length) {
+      status("ready", "已到达当前可播放范围，未请求范围外音频", owner);
+      return;
+    }
+    status("loading-source", supplied ? "正在准备已验证的当前播放音轨…" : "正在获取当前视频音轨…", owner);
+    // A supplied URL bypasses only source discovery. The bounded window queue,
+    // cancellation and text-only cache remain the same as the default path.
+    let sourceRequest: Promise<AudioSource>;
+    try {
+      if (supplied) {
+        if (typeof supplied.url !== "string" || !supplied.url.trim() || !Array.isArray(supplied.backupUrls)
+          || !supplied.backupUrls.every((url) => typeof url === "string")) throw new Error("已验证的播放音轨无效");
+        sourceRequest = Promise.resolve({ url: supplied.url, backupUrls: supplied.backupUrls.slice(0, 3) });
+      } else sourceRequest = getAudioSource({ bvid: owner.bvid, cid: owner.cid }, attempt.signal);
+    } catch (error) {
+      sourceRequest = Promise.reject(error);
+    }
+    void Promise.all([sourceRequest, loadCache()]).then(([source]) => {
+      if (session !== owner || owner.sourceAbort !== attempt || attempt.signal.aborted) return;
+      if (typeof source.url !== "string" || !source.url.trim() || !Array.isArray(source.backupUrls)
+        || !source.backupUrls.every((url) => typeof url === "string")) throw new Error("该视频没有可用音轨");
+      // Copy the snapshot so later mutations of the owner's object cannot swap
+      // the URL or backups while another window is queued.
+      owner.source = { url: source.url, backupUrls: source.backupUrls.slice(0, 3) };
+      plan(owner);
+    }).catch((error: unknown) => {
+      if (session !== owner || owner.sourceAbort !== attempt || attempt.signal.aborted) return;
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      status("error", `无法取得音轨：${readableError(error)}`, owner);
+    });
   }
 
   function start(input: StudyAsrStart): void {
@@ -382,6 +445,14 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       return;
     }
     const duration = Number(input.duration);
+    const hasValidatedSource = input.validatedAudioSource !== undefined;
+    const playableDuration = input.playableDuration;
+    if ((hasValidatedSource || playableDuration !== undefined)
+      && (typeof playableDuration !== "number" || !Number.isFinite(playableDuration) || playableDuration <= 0)) {
+      status("error", "当前播放音轨缺少有效的可播放时长，未请求音频");
+      return;
+    }
+    const durationLimit = Math.min(Number.isFinite(duration) && duration > 0 ? duration : Infinity, playableDuration ?? Infinity);
     const owner: Session = {
       bvid,
       cid,
@@ -389,32 +460,20 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       model: String(input.model || STUDY_ASR_DEFAULT_MODEL).trim() || STUDY_ASR_DEFAULT_MODEL,
       resourceId: input.resourceId,
       currentTime: Number.isFinite(input.currentTime) ? Math.max(0, input.currentTime) : 0,
-      ...(Number.isFinite(duration) && duration > 0 ? { duration } : {}),
+      ...(Number.isFinite(durationLimit) ? { duration: durationLimit } : {}),
+      validatedSource: hasValidatedSource,
       sourceAbort: new AbortController(),
       delivered: new Set(),
       failed: new Map()
     };
     session = owner;
-    status("loading-source", "正在获取当前视频音轨…", owner);
     if (options.getCurrentTime) {
       timer = setInterval(() => {
         if (session !== owner) return;
         try { updateTime(options.getCurrentTime!()); } catch { /* The player may be tearing down. */ }
       }, 1000);
     }
-    // Reuse upstream DASH selection with the study SW's cancellable metadata
-    // transport. It requests no audio bytes; stop also aborts this request.
-    void Promise.all([getAudioSource({ bvid, cid }, owner.sourceAbort.signal), loadCache()]).then(([source]) => {
-      if (session !== owner) return;
-      if (!String(source.url || "").trim()) throw new Error("该视频没有可用音轨");
-      owner.source = source;
-      plan(owner);
-    }).catch((error: unknown) => {
-      if (session !== owner) return;
-      if (timer !== undefined) clearInterval(timer);
-      timer = undefined;
-      status("error", `无法取得音轨：${readableError(error)}`, owner);
-    });
+    acquireSource(owner, input.validatedAudioSource);
   }
 
   return { start, stop, seek, updateTime };

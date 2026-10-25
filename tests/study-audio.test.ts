@@ -245,6 +245,105 @@ describe("bounded playback-window ASR", () => {
     expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "error" }));
     controller.stop();
   });
+
+  it("uses an explicit validated source without API discovery and caps a non-30-second preview tail", async () => {
+    const getAudioSource = vi.fn(async () => { throw new Error("playurl 412"); });
+    const requestWindow = vi.fn(async (window: StudyAudioWindow) => result(window.start));
+    const snapshot = { url: "https://upos-hz-mirrorakam.akamaized.net/audio.m4s?token=snapshot", backupUrls: ["https://example.bilivideo.com/backup.m4s"] };
+    const controller = createBoundedAsrController({ cacheStore: null, onCues: vi.fn(), getAudioSource, requestWindow });
+    controller.start({ ...video, validatedAudioSource: snapshot, playableDuration: 47.25 });
+    snapshot.url = "https://example.bilivideo.com/mutated.m4s";
+    snapshot.backupUrls[0] = "https://example.bilivideo.com/mutated-backup.m4s";
+    await flush();
+    expect(getAudioSource).not.toHaveBeenCalled();
+    expect(requestWindow.mock.calls.map(([window]) => [window.start, window.duration])).toEqual([[0, 30], [30, 17.25]]);
+    expect(requestWindow.mock.calls.every(([window]) => window.start + window.duration <= 47.25)).toBe(true);
+    expect(requestWindow.mock.calls[1][0]).toMatchObject({
+      audio_url: "https://upos-hz-mirrorakam.akamaized.net/audio.m4s?token=snapshot",
+      backup_urls: ["https://example.bilivideo.com/backup.m4s"]
+    });
+    controller.updateTime(60);
+    await flush();
+    expect(requestWindow).toHaveBeenCalledTimes(2);
+    controller.stop();
+  });
+
+  it("refuses a validated source without a positive finite playable limit and makes no request at or beyond the cap", async () => {
+    const getAudioSource = vi.fn(async () => source);
+    const requestWindow = vi.fn(async (window: StudyAudioWindow) => result(window.start));
+    const onStatus = vi.fn();
+    const controller = createBoundedAsrController({ cacheStore: null, onCues: vi.fn(), onStatus, getAudioSource, requestWindow });
+    for (const playableDuration of [undefined, 0, -1, NaN, Infinity]) {
+      controller.start({ ...video, validatedAudioSource: source, playableDuration });
+      await flush();
+      expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "error" }));
+    }
+    for (const currentTime of [47.25, 60, 600]) {
+      controller.start({ ...video, validatedAudioSource: source, playableDuration: 47.25, currentTime });
+      await flush();
+    }
+    expect(getAudioSource).not.toHaveBeenCalled();
+    expect(requestWindow).not.toHaveBeenCalled();
+    controller.stop();
+  });
+
+  it("uses the smaller nominal or playable duration and preserves the default discovery path", async () => {
+    const getAudioSource = vi.fn(async () => source);
+    const requestWindow = vi.fn(async (window: StudyAudioWindow) => result(window.start));
+    const controller = createBoundedAsrController({ cacheStore: null, onCues: vi.fn(), getAudioSource, requestWindow });
+    controller.start({ ...video, duration: 35.5, playableDuration: 47.25 });
+    await flush();
+    expect(getAudioSource).toHaveBeenCalledTimes(1);
+    expect(requestWindow.mock.calls.map(([window]) => [window.start, window.duration])).toEqual([[0, 30], [30, 5.5]]);
+    controller.stop();
+  });
+
+  it("discards a validated URL on seek and stop, rejects late results and needs a fresh snapshot to continue", async () => {
+    const getAudioSource = vi.fn(async () => source);
+    const onCues = vi.fn();
+    const calls: Array<{ window: StudyAudioWindow; signal: AbortSignal; pending: ReturnType<typeof deferred<unknown>> }> = [];
+    const controller = createBoundedAsrController({ cacheStore: null, onCues, getAudioSource,
+      requestWindow: (window, signal) => {
+        const pending = deferred<unknown>();
+        calls.push({ window, signal, pending });
+        return pending.promise;
+      } });
+    controller.start({ ...video, validatedAudioSource: source, playableDuration: 75 });
+    await flush();
+    controller.seek(35);
+    expect(calls[0].signal.aborted).toBe(true);
+    calls[0].pending.resolve(result(0, "obsolete"));
+    await flush();
+    expect(onCues).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(1);
+    expect(getAudioSource).not.toHaveBeenCalled();
+    controller.seek(35, { url: "https://example.bilivideo.com/fresh.m4s", backupUrls: [] });
+    await flush();
+    expect(calls[1].window).toMatchObject({ start: 30, audio_url: "https://example.bilivideo.com/fresh.m4s" });
+    controller.stop();
+    expect(calls[1].signal.aborted).toBe(true);
+    calls[1].pending.resolve(result(30, "also obsolete"));
+    await flush();
+    expect(onCues).not.toHaveBeenCalled();
+    controller.start({ ...video, bvid: "BVother", cid: "456" });
+    await flush();
+    expect(getAudioSource).toHaveBeenCalledWith({ bvid: "BVother", cid: "456" }, expect.any(AbortSignal));
+    expect(calls[2].window).toMatchObject({ bvid: "BVother", cid: "456", audio_url: source.url });
+    controller.stop();
+  });
+
+  it("never persists a validated source URL or its signed query", async () => {
+    const controller = createBoundedAsrController({ onCues: vi.fn(),
+      requestWindow: async (window) => result(window.start) });
+    controller.start({ ...video, validatedAudioSource: { url: "https://upos-hz-mirrorakam.akamaized.net/audio.m4s?private=validated", backupUrls: [] }, playableDuration: 15.5 });
+    await flush();
+    controller.stop();
+    await flush();
+    const disk = await chrome.storage.local.get(STUDY_AUDIO_CACHE_STORAGE_KEY);
+    expect(JSON.stringify(disk)).not.toContain("akamaized");
+    expect(JSON.stringify(disk)).not.toContain("private=validated");
+    expect((await createChromeStudyAudioCache().read())[0].cues).toEqual([{ from: 1, to: 3, content: "日本語です" }]);
+  });
 });
 
 describe("loopback transport and time-axis contract", () => {
