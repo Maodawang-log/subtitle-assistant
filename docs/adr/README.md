@@ -26,6 +26,8 @@
 | [0018](0018-gemini-native-protocol.md) | 引入第三种线格式协议（Gemini 原生 generateContext） | 有效 | 推翻 GLOSSARY.md 既有 Avoid 裁决（见正文背景） |
 | [0019](0019-settings-toggle-custom-drawn-boundary.md) | 设置抽屉布尔开关自绘 toggle-switch，操作型复选框保持原生 | 有效 | 自绘控件边界（持久设置布尔开关可自绘）；推翻 reader-settings-shell.css「不引入自定义替代控件」旧约定 |
 
+| [0020](0020-japanese-study-opt-in-variant.md) | 日语学习衍生入口按视频开启、限量本地ASR | 有效 | 用户2026-10-25明确要求覆盖该衍生入口的ADR-0017自动预抓；原入口保留 |
+
 编号一经分配不复用：裁决被推翻或被取代时新开一篇（见体例规则 3），退役编号留空行占位，不重开。
 
 ## 审查红线

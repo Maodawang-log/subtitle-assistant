@@ -1,0 +1,162 @@
+{
+  "日本語": {
+    "reading": "にほんご",
+    "meaning": "日语"
+  },
+  "私": {
+    "reading": "わたし",
+    "meaning": "我"
+  },
+  "今日": {
+    "reading": "きょう",
+    "meaning": "今天"
+  },
+  "明日": {
+    "reading": "あした",
+    "meaning": "明天"
+  },
+  "昨日": {
+    "reading": "きのう",
+    "meaning": "昨天"
+  },
+  "人": {
+    "reading": "ひと",
+    "meaning": "人"
+  },
+  "時間": {
+    "reading": "じかん",
+    "meaning": "时间；小时"
+  },
+  "勉強": {
+    "reading": "べんきょう",
+    "meaning": "学习；（口语）降价"
+  },
+  "学生": {
+    "reading": "がくせい",
+    "meaning": "学生"
+  },
+  "先生": {
+    "reading": "せんせい",
+    "meaning": "老师；对专业人士的称呼"
+  },
+  "食べる": {
+    "reading": "たべる",
+    "meaning": "吃"
+  },
+  "飲む": {
+    "reading": "のむ",
+    "meaning": "喝"
+  },
+  "行く": {
+    "reading": "いく",
+    "meaning": "去"
+  },
+  "来る": {
+    "reading": "くる",
+    "meaning": "来"
+  },
+  "見る": {
+    "reading": "みる",
+    "meaning": "看"
+  },
+  "聞く": {
+    "reading": "きく",
+    "meaning": "听；询问"
+  },
+  "話す": {
+    "reading": "はなす",
+    "meaning": "说；交谈"
+  },
+  "読む": {
+    "reading": "よむ",
+    "meaning": "读"
+  },
+  "書く": {
+    "reading": "かく",
+    "meaning": "写"
+  },
+  "する": {
+    "reading": "する",
+    "meaning": "做"
+  },
+  "ある": {
+    "reading": "ある",
+    "meaning": "有；存在（无生命事物）"
+  },
+  "いる": {
+    "reading": "いる",
+    "meaning": "有；在（有生命事物）"
+  },
+  "思う": {
+    "reading": "おもう",
+    "meaning": "想；认为"
+  },
+  "分かる": {
+    "reading": "わかる",
+    "meaning": "明白；理解"
+  },
+  "良い": {
+    "reading": "よい",
+    "meaning": "好"
+  },
+  "楽しい": {
+    "reading": "たのしい",
+    "meaning": "快乐；有趣"
+  },
+  "難しい": {
+    "reading": "むずかしい",
+    "meaning": "困难"
+  },
+  "大丈夫": {
+    "reading": "だいじょうぶ",
+    "meaning": "没关系；不要紧"
+  },
+  "ありがとう": {
+    "reading": "ありがとう",
+    "meaning": "谢谢"
+  },
+  "これ": {
+    "reading": "これ",
+    "meaning": "这个"
+  },
+  "それ": {
+    "reading": "それ",
+    "meaning": "那个（靠近对方）"
+  },
+  "あれ": {
+    "reading": "あれ",
+    "meaning": "那个（离双方较远）"
+  },
+  "は": {
+    "reading": "は",
+    "meaning": "提示主题的助词，作助词时读 wa"
+  },
+  "が": {
+    "reading": "が",
+    "meaning": "标示主语等的助词"
+  },
+  "を": {
+    "reading": "を",
+    "meaning": "标示动作对象等的助词，通常读 o"
+  },
+  "に": {
+    "reading": "に",
+    "meaning": "表示时间、目标、存在地点等的助词"
+  },
+  "で": {
+    "reading": "で",
+    "meaning": "表示动作地点、手段等的助词"
+  },
+  "の": {
+    "reading": "の",
+    "meaning": "表示所属、修饰等的助词"
+  },
+  "です": {
+    "reading": "です",
+    "meaning": "礼貌判断助动词"
+  },
+  "ます": {
+    "reading": "ます",
+    "meaning": "动词礼貌表达的助动词"
+  }
+}

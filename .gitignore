@@ -34,3 +34,4 @@ docs/harness-compaction-context-excerpt.md
 /eval/run.mjs
 /eval/sweep.mjs
 /eval/config.json
+dist-study/
