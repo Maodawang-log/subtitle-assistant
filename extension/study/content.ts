@@ -213,7 +213,7 @@ import { renderMarkdown } from "../ui/markdown.js";
   if(!container)return;
   const signature=cueKey(c)+"|"+zh+"|"+!!tokenizer;
   if(overlay?.parentElement!==container){clearOverlay();overlay=document.createElement("div");overlay.id="biliscript-study-overlay";Object.assign(overlay.style,{position:"absolute",left:"5%",right:"5%",bottom:"12%",zIndex:"2147483645",pointerEvents:"none"});overlayRoot=overlay.attachShadow({mode:"open"});container.append(overlay);}
-  overlay.style.bottom=document.fullscreenElement?Math.min(innerHeight*.65,Math.max(innerHeight*.14,controls.getBoundingClientRect().height+95))+"px":"12%";
+  overlay.style.bottom=document.fullscreenElement?Math.min(innerHeight*.65,Math.max(innerHeight*.14,container.getBoundingClientRect().bottom-controls.getBoundingClientRect().top+22))+"px":"12%";
   overlay.style.right=document.fullscreenElement&&!host.hidden?Math.max(0,host.getBoundingClientRect().width+40)+"px":"5%";
   if(signature===overlaySignature)return;overlaySignature=signature;
   overlayRoot.replaceChildren();

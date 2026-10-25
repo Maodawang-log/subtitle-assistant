@@ -42,7 +42,15 @@ export function createStudyShell(){
   if(full&&full.tagName!=="VIDEO"){
    slot.style.setProperty("display","none","important");
    restore();if(host.parentNode!==full)full.append(host);if(controls.parentNode!==full)full.append(controls);
+   // Keep native login/trial toasts visible and reachable; never hide them.
+   const area=full.getBoundingClientRect();let bottom=68;
+   for(const notice of full.querySelectorAll<HTMLElement>(".bpx-player-toast-wrap")){
+    const r=notice.getBoundingClientRect(),style=getComputedStyle(notice);
+    if(r.width>0&&r.height>0&&style.visibility!=="hidden"&&style.opacity!=="0"&&r.top>=area.top+area.height*.55&&r.top<area.bottom)bottom=Math.max(bottom,Math.ceil(area.bottom-r.top+12));
+   }
+   controls.style.setProperty("bottom",bottom+"px","important");
   }else if(!full){
+   controls.style.removeProperty("bottom");
    let player=video?.closest("#playerWrap,.player-wrap")||video?.closest("#bilibili-player,#bilibiliPlayer,.bilibili-player")||video?.closest(".bpx-player-container")||video?.parentElement;
    const column=video?.closest(".left-container");
    if(player&&column)while(player.parentElement&&player.parentElement!==column)player=player.parentElement;
