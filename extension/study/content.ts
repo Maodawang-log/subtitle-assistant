@@ -108,7 +108,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  function stop(reason="学习已关闭。字幕、音频和后续翻译任务已停止。"){
   recorder.clear();ui.setEnabled(false);scopeWaiting=false;lookupEpoch++;
   enabled=false;generation++;aiEpoch++;nativeMode=false;nativeSession=null;nativeSeekEpoch++;abort?.abort();abort=null;asr.stop();send({type:"study-stop-ai"}).catch(()=>{});loopOff();waiting=false;resumeAfter=false;asrMode=false;recognizedWindows=[];asrError=false;automaticFailed=false;loading=false;aiBusy=false;automaticBusy=false;
-  clearOverlay();$("enable").textContent="开启学习";$("show").textContent="开始日语学习";$("enable").classList.remove("on");status(reason);
+  clearOverlay();$("enable").textContent="开启学习";$("show").textContent="开始学习";$("enable").classList.remove("on");status(reason);
  }
  function reset(next){
   stop("已换视频，学习默认关闭。");route=next;identity="";clip=null;cues=[];chinese=[];selected=0;active=-1;offset=0;$("offset").value="0";translations.clear();attempted.clear();panelText="";
@@ -193,13 +193,13 @@ import { renderMarkdown } from "../ui/markdown.js";
   const button=document.createElement("button");button.textContent="AI 词义与变形";button.onclick=()=>safe(()=>ask("word",token.surface_form));
   target.append(title,info,meaning,save,button);
   try{
-   const r=await send({type:"study-dictionary-lookup",queries:[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)].filter(Boolean)});
+   const r=await send({type:"study-dictionary-lookup",language:"ja",queries:[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)].filter(Boolean)});
    if(!enabled||mine!==lookupEpoch)return;
    if(r?.ok&&r.entries?.length){
     meaning.replaceChildren();
     for(const item of r.entries){const p=document.createElement("p"),label=document.createElement("strong");label.textContent=item.term+" · "+item.reading;const body=document.createElement("div");body.textContent=item.meaning;p.append(label,body);meaning.append(p)}
-    const source=document.createElement("small");source.textContent="Jitendex 社区日中 · AI 译制 / 模型校订";meaning.append(source);
-   }else if(!entry)meaning.textContent=r?.ok?"已安装的日中词典未命中，或尚未安装。可在设置中下载安装。":r?.error||"本地词典暂时不可用。";
+    const source=document.createElement("small");source.textContent=r.entries[0].source;meaning.append(source);
+   }else if(!entry)meaning.textContent=r?.ok?"当前日语默认词典未命中，或尚未安装。可在设置中选择词典。":r?.error||"本地词典暂时不可用。";
   }catch{if(mine===lookupEpoch&&!entry)meaning.textContent="本地词典暂时不可用，请在设置中检查。"}
  }
  function renderVocabulary(){
@@ -292,7 +292,7 @@ import { renderMarkdown } from "../ui/markdown.js";
   $("source").textContent="手动导入："+f.name;display(0,true);status("已导入真实时间轴日文字幕。");$("subtitleFile").value="";
  });
  $("export").onclick=()=>safe(async()=>{guard();download(route.replace(":","-")+".txt",cues.map(c=>fmt(c.start)+" "+c.text+"\n"+chineseFor(c)).join("\n\n"))});
- $("exportWords").onclick=()=>download("日语生词.json",JSON.stringify(vocabulary,null,2),"application/json");
+ $("exportWords").onclick=()=>download("生词.json",JSON.stringify(vocabulary,null,2),"application/json");
  chrome.runtime.onMessage.addListener((m,s,reply)=>{
   if(m?.type==="study-toggle"){if(enabled){wrap.classList.remove("fold")}else safe(()=>start());reply({ok:true});return false;}
   if(m?.action!=="studyPlayReference")return;

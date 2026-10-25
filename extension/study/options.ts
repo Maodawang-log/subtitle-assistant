@@ -1,7 +1,8 @@
 // @ts-nocheck
-import { ZH_DICTIONARY,DICTIONARY_ORIGINS,checkDictionaryUpdate } from "./dictionary-catalog.js";
-import { dictionaryState,lookupDictionary } from "./dictionary-db.js";
-const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let previous={},release=ZH_DICTIONARY,installed,busy=true;
+import { ZH_DICTIONARY,DICTIONARIES,DICTIONARY_ORIGINS,checkDictionaryUpdate } from "./dictionary-catalog.js";
+import { dictionaryInventory,setDefaultDictionary,lookupDictionary } from "./dictionary-db.js";
+const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let previous={},release=ZH_DICTIONARY,installed,busy=true,operation="recover",inventory={installed:[],defaults:{}},lookupEpoch=0;
+const languageNames={ja:"日语",en:"英语",ko:"韩语",zh:"中文"},releases=new Map(DICTIONARIES.map(item=>[item.id,item]));
 const note=(id,text,error=false)=>{$(id).textContent=text;$(id).classList.toggle("error",error)};
 const download=(name,value,type="application/json")=>{const url=URL.createObjectURL(new Blob([value],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
 chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("autoStart").checked=!!previous.autoStart;$("asrModel").value=previous.asrModel||"small";$("autoTranslate").checked=previous.autoTranslate!==false;$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
@@ -17,17 +18,32 @@ $("health").onclick=async()=>{try{const r=await chrome.runtime.sendMessage({type
 $("diagnostics").onclick=async()=>{const data=(await chrome.storage.local.get("biliscriptJapaneseAiDiagnostics")).biliscriptJapaneseAiDiagnostics||[];download("讲解安全诊断.json",JSON.stringify({version:1,entries:data},null,2));note("status","已导出最近20次请求的类型、结束原因和计数；不含 Key、地址、字幕或原始响应。")};
 const worker=new Worker(chrome.runtime.getURL("study/dictionary-worker.js"));
 function buttons(){
- $("dictInstall").disabled=busy||installed?.version===release.version;$("dictUpdate").disabled=busy;$("dictDelete").disabled=busy||!installed;$("dictCancel").hidden=!busy;
+ $("dictLanguage").disabled=busy;$("dictDefault").disabled=busy||!inventory.installed.some(item=>DICTIONARIES.find(d=>d.id===item.id)?.sourceLanguage===$("dictLanguage").value);
+ $("dictInstall").disabled=busy||!release||installed?.version===release?.version;$("dictUpdate").disabled=busy||!release;$("dictDelete").disabled=busy||!installed;$("dictCancel").hidden=!busy||operation!=="install";
+ for(const button of $("dictionaryList").querySelectorAll("button"))button.disabled=busy;
  $("dictInstall").textContent=installed?"安装所选版本":"下载安装";
  $("dictState").textContent=installed?"已安装 · "+installed.rows.toLocaleString()+" 条":"未安装";
 }
-async function refresh(){installed=await dictionaryState();buttons();$("dictAttribution").textContent=installed?.attribution||""}
+function renderCatalog(){
+ const language=$("dictLanguage").value,available=DICTIONARIES.filter(item=>item.sourceLanguage===language);
+ if(!available.some(item=>item.id===release?.id))release=available.length?releases.get(available[0].id):undefined;
+ installed=inventory.installed.find(item=>item.id===release?.id);$("dictionaryList").replaceChildren();
+ for(const item of available){const button=document.createElement("button"),has=inventory.installed.some(x=>x.id===item.id);button.textContent=item.name+" · "+(has?"已安装":"可下载");button.dataset.dictionaryId=item.id;button.setAttribute("aria-pressed",String(item.id===release?.id));button.onclick=()=>{release=releases.get(item.id);renderCatalog();note("dictStatus","")};$("dictionaryList").append(button)}
+ $("dictionaryCard").hidden=!release;$("unsupportedLanguage").hidden=!!available.length;
+ if(release){$("dictName").textContent=release.name;$("dictLanguagePair").textContent=languageNames[release.sourceLanguage]+" → "+languageNames[release.targetLanguage];$("dictSize").textContent=(release.expectedRows?release.expectedRows.toLocaleString()+" 条记录 · ":"")+"下载 "+(release.bytes/1048576).toFixed(1)+" MiB";$("dictQuality").textContent=release.quality;$("dictVersion").textContent="目录版本："+release.version;$("dictSource").href=release.source;$("dictLicense").href=release.licenseUrl;$("dictLicense").textContent=release.license;$("dictAttribution").textContent=installed?.attribution||release.attribution}
+ const defaults=inventory.installed.filter(item=>available.some(d=>d.id===item.id));$("dictDefault").replaceChildren(...(defaults.length?defaults.map(item=>new Option(item.name,item.id)):[new Option("尚未安装","")]));$("dictDefault").value=inventory.defaults[language]||"";$("defaultLabel").textContent=languageNames[language]+"默认词典";
+ $("installedDictionaries").replaceChildren();for(const item of inventory.installed){const p=document.createElement("p"),lang=DICTIONARIES.find(d=>d.id===item.id).sourceLanguage;p.textContent=item.name+" · "+item.rows.toLocaleString()+" 条"+(inventory.defaults[lang]===item.id?" · "+languageNames[lang]+"默认":"");$("installedDictionaries").append(p)}if(!inventory.installed.length)$("installedDictionaries").textContent="尚未安装离线词典。";
+ $("lookup").disabled=!available.length;buttons();
+}
+async function refresh(){inventory=await dictionaryInventory();renderCatalog()}
+$("dictLanguage").onchange=()=>{lookupEpoch++;$("lookupResult").replaceChildren();$("lookupText").value="";$("lookupText").placeholder=$("dictLanguage").value==="en"?"英语单词，如 language":"日语原形或读音，如 食べる";renderCatalog();note("dictStatus","")};
+$("dictDefault").onchange=async()=>{try{await setDefaultDictionary($("dictLanguage").value,$("dictDefault").value);await refresh();lookupEpoch++;$("lookupResult").replaceChildren();note("dictStatus","已设置默认词典；其他语言的默认词典保持不变。")}catch(e){note("dictStatus",e.message,true)}};
 worker.onmessage=async({data})=>{
  const stage=data.stage;
  if(stage==="download"){note("dictStatus","正在下载："+(data.done/1048576).toFixed(1)+" / "+(data.total/1048576).toFixed(1)+" MB");$("dictProgress").hidden=false;$("dictProgress").value=data.done/data.total*100}
  else if(stage==="verify")note("dictStatus","正在核对 SHA256 与词典格式…");
- else if(stage==="import"){note("dictStatus","正在安装 "+data.done+" / "+data.total+" 个分片 · "+data.rows.toLocaleString()+" 条");$("dictProgress").hidden=false;$("dictProgress").value=data.done/data.total*100}
- else {busy=false;$("dictProgress").hidden=true;await refresh();if(stage==="installed")note("dictStatus","安装完成，可离线查询。版本："+data.meta.version);else if(stage==="deleted")note("dictStatus","已删除离线词典。");else if(stage!=="ready")note("dictStatus",data.message,stage==="error")}
+ else if(stage==="import"){note("dictStatus","正在安装 "+data.done+" / "+data.total+" "+(data.unit||"分片")+" · "+data.rows.toLocaleString()+" 条");$("dictProgress").hidden=false;$("dictProgress").value=data.done/data.total*100}
+ else {busy=false;operation="";$("dictProgress").hidden=true;await refresh();if(stage==="installed")note("dictStatus","已安装 "+data.meta.name+"，可离线查询。版本："+data.meta.version);else if(stage==="deleted")note("dictStatus","已删除所选词典，其他词典不受影响。");else if(stage!=="ready")note("dictStatus",data.message,stage==="error")}
 };
 worker.onerror=()=>{busy=false;buttons();note("dictStatus","词典任务中断。重新打开设置页会清理未完成安装，原版本仍可用。",true)};
 worker.postMessage({action:"recover"});
@@ -35,16 +51,16 @@ $("dictInstall").onclick=async()=>{
  try{
   const granted=await chrome.permissions.request({origins:DICTIONARY_ORIGINS});
   if(!granted)throw new Error("未允许访问词典发布站点，下载未开始");
-  busy=true;buttons();worker.postMessage({action:"install",release});
+  busy=true;operation="install";buttons();worker.postMessage({action:"install",release});
  }catch(e){note("dictStatus",e.message,true)}
 };
 $("dictUpdate").onclick=async()=>{
- try{const granted=await chrome.permissions.request({origins:DICTIONARY_ORIGINS});if(!granted)throw new Error("未允许检查词典发布站点");busy=true;buttons();release=await checkDictionaryUpdate(AbortSignal.timeout(30000));note("dictStatus",installed?.version===release.version?"已是最新版本："+release.version:"可安装版本："+release.version+" · "+(release.bytes/1048576).toFixed(1)+" MB；点击安装。")}
+ try{const granted=await chrome.permissions.request({origins:DICTIONARY_ORIGINS});if(!granted)throw new Error("未允许检查词典发布站点");busy=true;operation="update";buttons();release=await checkDictionaryUpdate(AbortSignal.timeout(30000),release.id);releases.set(release.id,release);renderCatalog();note("dictStatus",release.format==="ecdict-csv"?"当前目录固定为已核验版本 "+release.version+"；新版资源随目录更新。":installed?.version===release.version?"已是最新版本："+release.version:"可安装版本："+release.version+"；点击安装。")}
  catch(e){note("dictStatus",e.name==="TimeoutError"?"检查更新超时；原词典仍可使用。":e.message,true)}
  finally{busy=false;buttons()}
 };
 $("dictCancel").onclick=()=>{worker.postMessage({action:"cancel"});note("dictStatus","正在取消并清理未完成安装…")};
-$("dictDelete").onclick=()=>{busy=true;buttons();note("dictStatus","正在删除本地词典…");worker.postMessage({action:"delete"})};
+$("dictDelete").onclick=()=>{busy=true;operation="delete";buttons();note("dictStatus","正在删除 "+release.name+"…");worker.postMessage({action:"delete",id:release.id})};
 $("dictImport").onclick=()=>$("dictFile").click();
 $("dictExample").onclick=()=>download("日中词典格式示例.json",JSON.stringify({"食べる":{reading:"たべる",meaning:"吃"}},null,2));
 $("dictFile").onchange=async()=>{
@@ -57,6 +73,6 @@ $("dictFile").onchange=async()=>{
  finally{$("dictFile").value=""}
 };
 $("lookup").onclick=async()=>{
- const text=$("lookupText").value.trim();if(!text||text.length>100)return;
- try{const entries=await lookupDictionary([text]);$("lookupResult").replaceChildren();if(!entries.length){$("lookupResult").textContent="未命中；请检查词典已安装，或改用词典原形。";return}for(const item of entries){const p=document.createElement("p");p.textContent=item.term+" · "+item.reading+"\n"+item.meaning;$("lookupResult").append(p)}}catch{note("lookupResult","词典查询失败，请重新打开设置检查安装状态。",true)}
+ const text=$("lookupText").value.trim(),language=$("dictLanguage").value,mine=++lookupEpoch;if(!text||text.length>100)return;
+ try{const entries=await lookupDictionary([text],language);if(mine!==lookupEpoch)return;$("lookupResult").replaceChildren();if(!entries.length){$("lookupResult").textContent="当前语言的默认词典未命中；请先安装词典，或改用词典原形。";return}for(const item of entries){const p=document.createElement("p");p.textContent=item.term+" · "+item.reading+"\n"+item.meaning+"\n来源："+item.source;$("lookupResult").append(p)}}catch{if(mine===lookupEpoch)note("lookupResult","词典查询失败，请重新打开设置检查安装状态。",true)}
 };

@@ -1,12 +1,12 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ExistingDirectory = "",
-    [string]$PackageDirectory = "E:\Work\日语视频学习插件\outputs\biliscript-japanese-study-2.6.3.3"
+    [string]$PackageDirectory = "E:\Work\日语视频学习插件\outputs\biliscript-japanese-study-2.6.3.4"
 )
 $ErrorActionPreference = "Stop"
 $taskRoot = "E:\Work\日语视频学习插件"
 if ([string]::IsNullOrWhiteSpace($ExistingDirectory)) {
-    Write-Host "请在 Edge/Chrome 扩展管理页查看当前日语学习扩展的加载目录。"
+    Write-Host "请在 Edge/Chrome 扩展管理页查看当前语言学习扩展（旧名 BiliScript 日语学习）的加载目录。"
     Write-Host "本脚本保留该路径，先完整备份再更新文件；不读取浏览器配置或 API Key。"
     $ExistingDirectory = Read-Host "粘贴原加载目录（通常是 outputs 下的 2.6.3.2 目录）"
 }
@@ -22,15 +22,15 @@ foreach ($folder in @($target,$source)) {
 }
 $old = Get-Content -LiteralPath (Join-Path $target "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $new = Get-Content -LiteralPath (Join-Path $source "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($old.name -ne "BiliScript 日语学习" -or $new.name -ne $old.name -or $new.version -ne "2.6.3.3") { throw "扩展身份或新包版本不匹配。" }
-if ($old.version -eq $new.version) { Write-Host "此目录已经是 2.6.3.3。"; return }
-if ($old.version -notin @("2.6.3.1","2.6.3.2")) { throw "此脚本只从2.6.3.1或2.6.3.2升级。" }
+if ($old.name -notin @("BiliScript 日语学习","语言学习助手") -or $new.name -ne "语言学习助手" -or $new.version -ne "2.6.3.4") { throw "扩展身份或新包版本不匹配。" }
+if ($old.version -eq $new.version) { Write-Host "此目录已经是 2.6.3.4。"; return }
+if ($old.version -notin @("2.6.3.1","2.6.3.2","2.6.3.3")) { throw "此脚本支持从2.6.3.1、2.6.3.2或2.6.3.3升级。" }
 $stamp = (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + [Guid]::NewGuid().ToString("N").Substring(0,8)
 $backup = Join-Path $taskRoot ("snapshots\in-place-upgrade-" + $stamp)
 Write-Host "原加载目录：$target"
 Write-Host "新版本来源：$source"
 Write-Host "完整备份至：$backup"
-if (!$PSCmdlet.ShouldProcess($target,"完整备份后原地升级为2.6.3.3")) { return }
+if (!$PSCmdlet.ShouldProcess($target,"完整备份后原地升级为2.6.3.4")) { return }
 New-Item -ItemType Directory -Path $backup | Out-Null
 $before = @()
 foreach ($file in Get-ChildItem -LiteralPath $target -File -Recurse -Force) {

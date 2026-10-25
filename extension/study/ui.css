@@ -23,3 +23,22 @@
 :host([data-fullscreen]) #practiceStatus{color:#b4c6b0}
 .toolbar button{font-size:13px;min-height:36px;padding:7px 10px}
 @media(max-width:800px){.toolbar{gap:8px;padding:10px}.study-mark{display:none}.transport{border:0}.actions{flex:auto}.toolbar button{padding:6px 7px}:host(#biliscript-japanese-study[data-fullscreen]){right:12px;top:5%;width:340px;max-width:80vw}.panel{min-height:300px}.head{padding:12px}}
+
+/* Host rules must beat page-level div resets; internal content stays in Shadow DOM. */
+:host{display:block!important;position:relative!important;float:none!important;clear:both!important;box-sizing:border-box!important;width:auto!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif!important}
+:host([hidden]){display:none!important}
+.study-bar{display:flow-root;max-width:100%;min-width:0}
+.entry{margin:0}
+#learningControls{display:flow-root;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fffefb;overflow:clip}
+.toolbar{gap:8px;padding:0;border:0;border-radius:0;background:transparent;box-shadow:none;align-content:start}
+.transport,.actions{flex:0 0 auto;max-width:100%;min-width:0}
+.toolbar button{flex:0 0 auto}
+#status{margin:10px 0 0;padding:0;overflow-wrap:anywhere}
+:host([data-fullscreen]){position:absolute!important}
+:host(#biliscript-japanese-study[data-fullscreen]){width:360px!important;max-width:38vw!important;max-height:72vh!important}
+:host(#biliscript-study-controls[data-fullscreen]){max-width:none!important}
+:host([data-fullscreen]) #learningControls{display:flex;padding:0;border:0;background:transparent;overflow:visible}
+:host([data-fullscreen]) input,:host([data-fullscreen]) select{background:#22372b;color:#e0eddf;border-color:#ffffff30;color-scheme:dark}
+:host([data-fullscreen]) .toolbar{padding:10px 12px;border:1px solid #ffffff26;border-radius:12px;background:#18291fdb}
+:host([data-fullscreen]) #status{margin:8px 5px 0}
+@media(max-width:800px){:host(#biliscript-japanese-study[data-fullscreen]){max-width:80vw!important}.transport{padding-right:0}}

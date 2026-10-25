@@ -20,7 +20,8 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(m?.type==="study-stop-ai"){abortTab(sender.tab?.id);reply({ok:true});return false}
  if(m?.type==="study-dictionary-lookup"){
   const queries=Array.isArray(m.queries)?m.queries.filter(x=>typeof x==="string"&&x.length>0&&x.length<100).slice(0,4):[];
-  lookupDictionary(queries).then(entries=>reply({ok:true,entries})).catch(()=>reply({ok:false,error:"本地词典暂时不可用，请在设置页检查安装状态。"}));return true;
+  const language=m.language===undefined?"ja":m.language;if(!["ja","en"].includes(language)){reply({ok:false,error:"本版尚未提供所选语言的词典"});return false}
+  lookupDictionary(queries,language).then(entries=>reply({ok:true,entries})).catch(()=>reply({ok:false,error:"本地词典暂时不可用，请在设置页检查安装状态。"}));return true;
  }
  if(m?.type!=="study-ai")return;
  const tabId=sender.tab?.id;if(!tabId){reply({ok:false,error:"只接受当前视频的学习请求"});return false}
