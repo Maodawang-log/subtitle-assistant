@@ -46,7 +46,7 @@ export function readNativeStudyPage(){
   if(!entry)continue;
   const now=marker.sync();if(now.routeEpoch!==state.routeEpoch||now.videoGeneration!==state.videoGeneration||now.routeKey!==bvid+":p"+page||video.currentSrc!==state.mediaSrc)return no("STALE");
   const list=vd.subtitle?.list,present=Array.isArray(list),ja=present?list.filter((t:any)=>/^(?:ai-)?(?:ja|jp)(?:[-_]|$)/i.test(String(t.lan||""))).length:0;
-  return {status:"ready",bvid,cid,title:String(vd.title||"").slice(0,512),duration,playableDuration,subtitleListPresent:present,japaneseTrackCount:ja,
+  return {status:"ready",bvid,cid,title:String(vd.title||"").slice(0,512),duration,playableDuration,subtitleListPresent:present,japaneseTrackCount:ja,englishTrackCount:present?list.filter((t:any)=>/^(?:ai-)?en(?:[-_]|$)/i.test(String(t.lan||""))).length:0,
    source:{url,backupUrls:[]},binding:{documentId:state.documentId,timeOrigin:state.timeOrigin,routeKey:state.routeKey,routeEpoch:state.routeEpoch,videoGeneration:state.videoGeneration,videoTag:tag,mediaSrc:state.mediaSrc},
    audit:{exactUrlMatch:true,responseStatus:206,requestStart:entry.startTime,epochStart:state.epochStart,videoEpoch:state.videoEpoch,cidPathMatch:true,previewSeconds,accessScope:previewSeconds!==null?"preview":released?"continued-playback":"current-player",host:new URL(url).hostname}};
  }

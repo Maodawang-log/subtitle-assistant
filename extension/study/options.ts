@@ -7,14 +7,22 @@ const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let pre
 const languageNames={ja:"日语",en:"英语",ko:"韩语",zh:"中文"},releases=new Map(DICTIONARIES.map(item=>[item.id,item]));
 const note=(id,text,error=false)=>{$(id).textContent=text;$(id).classList.toggle("error",error)};
 const download=(name,value,type="application/json")=>{const url=URL.createObjectURL(new Blob([value],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
-chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("asrModel").value=previous.asrModel||"small";$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
+chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("defaultSourceLanguage").value=previous.sourceLanguage==="en"?"en":"ja";$("asrModel").value=previous.asrModel||"small";$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
+$("defaultSourceLanguage").onchange=async()=>{const latest=(await chrome.storage.local.get(key))[key]||{};await chrome.storage.local.set({[key]:{...latest,sourceLanguage:$("defaultSourceLanguage").value}});note("status","原语言默认值已保存；当前视频可在字幕面板单独选择。")};
 $("save").onclick=async()=>{
  try{
-  const u=new URL($("baseUrl").value.trim());if(u.username||u.password||u.search||u.hash||u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("请输入不含凭据或查询参数的HTTPS或本机HTTP地址");
-  const granted=await chrome.permissions.request({origins:[u.origin+"/*"]});if(!granted)throw new Error("未允许访问该接口域名，未保存");
   const latest=(await chrome.storage.local.get(key))[key]||{};
-  const data={...latest,asrModel:$("asrModel").value,autoStart:false,autoTranslate:false,baseUrl:u.href.replace(/\/+$/,""),model:$("model").value.trim(),compatibility:$("compatibility").value,apiKey:$("apiKey").value.trim()||latest.apiKey||""};
-  if(!data.model)throw new Error("请填写模型名");await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status","已保存。关闭字幕再开启会应用新设置。");
+  const baseUrl=$("baseUrl").value.trim(),model=$("model").value.trim(),typedKey=$("apiKey").value.trim();
+  const data={...latest,asrModel:$("asrModel").value,sourceLanguage:$("defaultSourceLanguage").value,autoStart:false,autoTranslate:false};
+  if(baseUrl||model||typedKey){
+   let u;try{u=new URL(baseUrl)}catch{throw new Error("请填完整文字接口地址和模型；仅用本地功能可将两项留空。")}
+   if(u.username||u.password||u.search||u.hash||u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("请输入不含凭据或查询参数的HTTPS或本机HTTP地址");
+   if(!model)throw new Error("请填写模型名；仅用本地功能可将地址和模型都留空。");
+   const apiKey=typedKey||latest.apiKey||"";
+   if(apiKey){const granted=await chrome.permissions.request({origins:[u.origin+"/*"]});if(!granted)throw new Error("未允许访问该接口域名，未保存")}
+   Object.assign(data,{baseUrl:u.href.replace(/\/+$/,""),model,compatibility:$("compatibility").value,apiKey});
+  }
+  await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status",baseUrl||model?"已保存。关闭字幕再开启会应用新设置。":"本地设置已保存；已有文字接口设置保留。");
  }catch(e){note("status",e.message,true)}
 };
 $("health").onclick=async()=>{try{const r=await chrome.runtime.sendMessage({type:"study-local-asr",action:"health",requestId:crypto.randomUUID()});if(!r?.ok)throw new Error(r?.error?.message||"本地服务未启动");note("status","本地识别服务可用。")}catch(e){note("status",e.message+" 请在下方‘本地模型与服务’连接并启动服务。",true)}};

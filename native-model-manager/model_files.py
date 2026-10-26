@@ -30,8 +30,16 @@ def inspect_model(path,safe):
     lang_ids=config.get('lang_ids',[])
     if not isinstance(lang_ids,list) or any(not isinstance(value,int) for value in lang_ids):raise ValueError('Whisper 语言配置格式不完整。')
     tokens={entry.get('content'):entry.get('id') for entry in tokenizer.get('added_tokens',[]) if isinstance(entry,dict)}
-    tokens.update(tokenizer['model'].get('vocab',{}));ja=tokens.get('<|ja|>');japanese=isinstance(ja,int) and ja in lang_ids
-    return {'name':path.name,'revision':'local','repo':'','source':'local-import','files':files,'language':'多语言（含日语）' if japanese else '未确认支持日语','japaneseSupported':japanese,'positioning':'本地格式检查通过；实际加载与效果需启动后验证。'}
+    tokens.update(tokenizer['model'].get('vocab',{}))
+    # English-only Whisper retains language-looking tokens; their presence alone
+    # does not imply multilingual weights. The standard English tokenizer uses
+    # the GPT-2 end/start token IDs instead of the multilingual layout.
+    english_only=tokens.get('<|endoftext|>')==50256 and tokens.get('<|startoftranscript|>')==50257
+    ja,en=tokens.get('<|ja|>'),tokens.get('<|en|>')
+    japanese=not english_only and isinstance(ja,int) and ja in lang_ids
+    english=english_only or isinstance(en,int) and en in lang_ids
+    language='多语言（日语、英语）' if japanese and english else '日语' if japanese else '英语' if english else '语言未确认'
+    return {'name':path.name,'revision':'local','repo':'','source':'local-import','files':files,'language':language,'japaneseSupported':japanese,'englishSupported':english,'languageCapabilitiesVersion':2,'positioning':'本地格式检查通过；实际加载与效果需启动后验证。'}
 
 def file_identity(path):
     info=path.stat()

@@ -90,7 +90,7 @@ function windowPayload(raw: unknown, requestId: string): Record<string, unknown>
       typeof p.cid !== "string" || !/^\d+$/.test(p.cid) ||
       typeof p.start !== "number" || !Number.isFinite(p.start) || p.start < 0 ||
       typeof p.duration !== "number" || !Number.isFinite(p.duration) || p.duration <= 0 || p.duration > 30 ||
-      (p.language !== undefined && p.language !== "ja") ||
+      (p.language !== undefined && p.language !== "ja" && p.language !== "en") ||
       (p.model !== undefined && (typeof p.model !== "string" || !/^[A-Za-z0-9][\w.-]{0,63}$/.test(p.model)))) return null;
   const backups = p.backup_urls === undefined ? [] : p.backup_urls;
   if (!Array.isArray(backups) || backups.length > 8 || !backups.every(audioUrl)) return null;
@@ -98,7 +98,7 @@ function windowPayload(raw: unknown, requestId: string): Record<string, unknown>
   // endpoint URLs or future message fields into the local service.
   return { request_id: requestId, audio_url: p.audio_url, backup_urls: backups,
     bvid: p.bvid, cid: p.cid, start: p.start, duration: p.duration,
-    language: "ja", model: p.model || "small" };
+    language: p.language || "ja", model: p.model || "small" };
 }
 
 function localServiceError(data: unknown): WireError | null {
@@ -108,8 +108,9 @@ function localServiceError(data: unknown): WireError | null {
   const code = /^[\w-]{1,40}$/.test(String(raw.code)) ? String(raw.code) : "SERVICE";
   // The loopback service uses fixed messages, never native CDN exceptions.
   // Also redact URL-bearing/overlong text if an incompatible service is running.
+  if(typeof raw.message === "string" && raw.message.includes("requires language=ja") && !raw.message.includes("or en"))return errorReply("LOCAL_UPGRADE", "当前识别服务仅支持日语窗口，请升级配套至 1.2.0，并在设置中手动接管或重启服务后使用英语。");
   const message = typeof raw.message === "string" && raw.message.length <= 300 && !/https?:\/\//i.test(raw.message)
-    ? raw.message : "本地日语服务未完成这段音频识别";
+    ? raw.message : "本地识别服务未完成这段音频识别";
   return errorReply(`LOCAL_${code}`, message);
 }
 
@@ -210,15 +211,15 @@ export function createStudyProxy(deps: ProxyDependencies) {
           data = await pageFetch(task.tabId, url, key);
         } else {
           const response = await fetchImpl(url, init);
-          if (!response.ok) throw new Error("HTTP");
           data = await response.json();
+          if (!response.ok && !(local && localServiceError(data))) throw new Error("HTTP");
         }
         reply(task.controller.signal.aborted ? errorReply("ABORTED", "请求已取消") :
           (local ? localServiceError(data) : null) || { ok: true, data });
       } catch {
         // Never return native fetch error text: it can include a signed CDN URL.
         reply(task.controller.signal.aborted ? errorReply("ABORTED", "请求已取消") :
-          errorReply("FETCH", local ? "本地日语服务请求失败，请检查服务状态" : "B 站字幕请求失败，请重试"));
+          errorReply("FETCH", local ? "本地识别服务请求失败，请检查服务状态" : "B 站字幕请求失败，请重试"));
       } finally {
         if (pending.get(key) === task) pending.delete(key);
       }

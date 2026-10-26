@@ -60,6 +60,12 @@
 :host(:not([data-fullscreen])) .toolbar{flex-wrap:wrap;gap:8px 10px;min-height:38px}
 :host(:not([data-fullscreen])) .transport,:host(:not([data-fullscreen])) .actions{flex:0 1 auto;flex-wrap:wrap;gap:6px}
 :host(:not([data-fullscreen])) .toolbar button{font-size:14px;min-height:38px;line-height:20px;padding:8px 10px}
+:host(:not([data-fullscreen])) #learningControls{container-type:inline-size;container-name:study-toolbar}
+@container study-toolbar (max-width:900px){
+ :host(:not([data-fullscreen])) .toolbar{column-gap:8px}
+ :host(:not([data-fullscreen])) .transport,:host(:not([data-fullscreen])) .actions{gap:5px}
+ :host(:not([data-fullscreen])) .toolbar button{padding-inline:8px}
+}
 :host(:not([data-fullscreen])) #record,:host(:not([data-fullscreen])) #stopStudy{display:none}
 :host(:not([data-fullscreen])) #position{font-size:13px;flex:0 0 auto;white-space:nowrap}
 :host(:not([data-fullscreen])) .panel{height:var(--study-panel-height,min(760px,calc(100vh - 140px)));margin-bottom:0}

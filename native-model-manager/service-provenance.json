@@ -7,6 +7,9 @@
     "managed instance status",
     "15-minute other-consumer protection",
     "short-lived file stop intent rejects new ASR jobs before owned shutdown",
-    "allow the study consumer header in extension CORS preflights"
+    "allow the study consumer header in extension CORS preflights",
+    "explicit ja/en bounded source-language transcription; no translation task",
+    "runtime supported-language guard and English-safe model warmup",
+    "English segment text spacing and advertised window languages"
   ]
 }

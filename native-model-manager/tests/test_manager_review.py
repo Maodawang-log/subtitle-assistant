@@ -27,7 +27,7 @@ class ManagerReview(unittest.TestCase):
         self.home.mkdir(); self.legacy.mkdir()
         (self.home / 'host-config.json').write_text(json.dumps({'legacyBase': str(self.legacy)}))
         self.files = {'model.bin': b'fixture-model-data', 'config.json': b'{}'}
-        self.catalog = {'small': {'repo': 'Systran/fixture', 'revision': 'f' * 40, 'name': 'Offline fixture', 'files': {
+        self.catalog = {'small': {'repo': 'Systran/fixture', 'revision': 'f' * 40, 'name': 'Offline fixture', 'japaneseSupported': True, 'englishSupported': True, 'files': {
             name: {'bytes': len(value), 'sha256': hashlib.sha256(value).hexdigest()}
             for name, value in self.files.items()
         }}}

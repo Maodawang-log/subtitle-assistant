@@ -2,11 +2,12 @@
 // controller calls it only after the user enables the current video.
 import { fetchVideoMeta, fetchSubtitleBundle, type SubtitleTrack } from "../bilibili/gateway.js";
 import { computeCurrentClipSignature, extractBvid, extractPageIndex } from "../bilibili/video-id-shared.js";
+import { isSourceTrack, sourceLanguageName, type SourceLanguage } from "./source-language.js";
 import { sendStudyMessage } from "./messaging.js";
 
 export interface StudyCue { from: number; to: number; content: string }
 export interface JapaneseCcResult {
-  status: "ready" | "no-japanese";
+  status: "ready" | "no-japanese" | "no-source";
   bvid: string;
   cid: string;
   title: string;
@@ -23,6 +24,7 @@ export class StudyCcError extends Error {
   }
 }
 export interface JapaneseCcOptions {
+  language?: SourceLanguage;
   signal: AbortSignal;
   onStatus?: (message: string) => void;
   preferredTrackId?: string;
@@ -33,7 +35,7 @@ export interface CcSourceDependencies {
   fetchJson(url: string, signal: AbortSignal): Promise<unknown>;
 }
 
-function aborted(): DOMException { return new DOMException("日语字幕请求已取消", "AbortError"); }
+function aborted(): DOMException { return new DOMException("字幕请求已取消", "AbortError"); }
 // A separate cancellable route keeps the upstream legacy fetch-json contract
 // intact for getSourceAudioUrl. Neither route accepts arbitrary network hosts.
 export function fetchStudyBiliJson(url: string, signal: AbortSignal): Promise<unknown> {
@@ -77,13 +79,14 @@ function cueBody(payload: unknown): StudyCue[] {
     return Number.isFinite(from) && from >= 0 && Number.isFinite(to) && to > from && content
       ? [{ from, to, content }] : [];
   }).sort((a, b) => a.from - b.from);
-  if (!cues.length) throw new StudyCcError("EMPTY_SUBTITLE", "这条日语字幕轨没有可用正文");
+  if (!cues.length) throw new StudyCcError("EMPTY_SUBTITLE", "这条字幕轨没有可用正文");
   return cues;
 }
 
 export function createJapaneseCcSource(deps: CcSourceDependencies) {
   return async function getJapaneseCc(options: JapaneseCcOptions): Promise<JapaneseCcResult> {
-    const { signal } = options;
+    const { signal, language = "ja" } = options;
+    const name = sourceLanguageName(language);
     const initialUrl = deps.currentUrl();
     const parsed = new URL(initialUrl);
     const bvid = extractBvid(initialUrl);
@@ -123,19 +126,19 @@ export function createJapaneseCcSource(deps: CcSourceDependencies) {
     const cid = page?.cid || (pageIndex === 1 && meta.pages.length === 0 ? meta.defaultCid : "");
     if (!/^\d+$/.test(cid)) throw new StudyCcError("PAGE_ID", "无法确认当前分P的 CID，请重试");
     const title = pageIndex > 1 && page?.part ? `${meta.title} · ${page.part}` : meta.title;
-    status("正在检查日语字幕轨…");
+    status(`正在检查${name}字幕轨…`);
     const { tracks } = await fetchSubtitleBundle(transport, { bvid, cid, aid: meta.aid });
     guard();
-    const japanese = tracks.filter(isJapaneseTrack);
+    const japanese = tracks.filter(track => isSourceTrack(track, language));
     const preferred = options.preferredTrackId
       ? japanese.find((track) => track.id === options.preferredTrackId) : undefined;
     if (options.preferredTrackId && !preferred) {
-      throw new StudyCcError("TRACK", "所选日语字幕轨已不可用");
+      throw new StudyCcError("TRACK", `所选${name}字幕轨已不可用`);
     }
-    const selected = preferred || japanese.find((track) => /^ja(?:[-_]|$)/i.test(track.lan)) || japanese[0];
-    const result: JapaneseCcResult = { status: selected ? "ready" : "no-japanese", bvid, cid, title, tracks, cues: [] };
+    const selected = preferred || japanese.find((track) => !/^ai-/i.test(track.lan)) || japanese[0];
+    const result: JapaneseCcResult = { status: selected ? "ready" : language === "ja" ? "no-japanese" : "no-source", bvid, cid, title, tracks, cues: [] };
     if (!selected) return result; // Chinese-only CC is never relabelled or back-translated.
-    status("正在读取日语字幕…");
+    status(`正在读取${name}字幕…`);
     result.cues = cueBody(await transport(selected.subtitleUrl));
     result.selectedTrackId = selected.id;
     if (options.includeChinese) {
@@ -149,7 +152,7 @@ export function createJapaneseCcSource(deps: CcSourceDependencies) {
           guard();
           if ((error as { name?: unknown })?.name === "AbortError") throw error;
           result.chineseCues = [];
-          result.chineseWarning = "中文字幕暂不可用，已保留日语原文";
+          result.chineseWarning = `中文字幕暂不可用，已保留${name}原文`;
         }
       }
     }

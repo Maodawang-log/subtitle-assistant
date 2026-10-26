@@ -1,0 +1,17 @@
+{
+  "description": "Synthetic data for an isolated browser language audit. No real video, model output or provider response is represented.",
+  "videos": [
+    { "bvid": "BV1wYAmeqEuV", "cid": "101001", "title": "English language audit one", "duration": 90 },
+    { "bvid": "BV1ab411c7mD", "cid": "101002", "title": "English language audit two", "duration": 90 }
+  ],
+  "englishText": "Hello, don't rush—we study language together.",
+  "englishWords": ["Hello", "don't", "rush", "we", "study", "language", "together"],
+  "firstSelection": "don't rush—we study",
+  "lateSelection": "we study language",
+  "legacyWord": { "term": "language", "reading": "", "meaning": "Legacy Japanese-language entry", "at": 1 },
+  "dictionaryTerms": [
+    { "term": "language", "reading": "ˈlæŋɡwɪdʒ", "meaning": "英语夹具：语言" },
+    { "term": "study", "reading": "ˈstʌdi", "meaning": "英语夹具：学习" },
+    { "term": "don't", "reading": "dəʊnt", "meaning": "英语夹具：do not" }
+  ]
+}

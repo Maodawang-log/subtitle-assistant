@@ -24,12 +24,23 @@ describe("independent study background proxy", () => {
     expect(reply).toHaveBeenCalledWith({ ok: true, data: { segments: [], timestamp_origin: "absolute" } });
   });
 
-  it("rejects other senders, overlong windows, language changes and non-CDN audio before fetch", () => {
+  it("forwards an explicitly English bounded window without changing its language", async () => {
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => ok({ segments: [], timestamp_origin: "absolute" }));
+    const proxy = createStudyProxy({ extensionId: "test", fetchImpl }), reply = vi.fn();
+    proxy.handle({ type: "study-local-asr", action: "window", requestId: "english", payload: { ...payload, language: "en" } }, sender, reply);
+    await tick();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${STUDY_LOCAL_ORIGIN}/v1/audio/window`);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]!.body))).toEqual({ ...payload, language: "en", request_id: "7:english" });
+    expect(reply).toHaveBeenCalledWith({ ok: true, data: { segments: [], timestamp_origin: "absolute" } });
+  });
+
+  it("rejects other senders, overlong windows, unsupported languages and non-CDN audio before fetch", () => {
     const fetchImpl = vi.fn();
     const proxy = createStudyProxy({ extensionId: "test", fetchImpl });
     const reply = vi.fn();
     proxy.handle({ type: "study-local-asr", action: "health", requestId: "one" }, { id: "another" }, reply);
-    for (const patch of [{ duration: 31 }, { duration: -1 }, { start: NaN }, { language: "en" },
+    for (const patch of [{ duration: 31 }, { duration: -1 }, { start: NaN }, { language: "ko" },
       { audio_url: "http://127.0.0.1/" }, { audio_url: "https://bilivideo.com.evil.example/a" },
       { backup_urls: ["https://evil.example/a"] }, { model: "../../config" }]) {
       proxy.handle({ type: "study-local-asr", action: "window", requestId: "one", payload: { ...payload, ...patch } }, sender, reply);

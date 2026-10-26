@@ -11,15 +11,15 @@ async function flush() { for (let i = 0; i < 30; i++) await Promise.resolve(); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 function fixture() {
   return {
-    protocolVersion: 2, version: "1.1.0", directory: "E:\\Fixture\\future-models", service: null,
+    protocolVersion: 3, version: "1.2.0", directory: "E:\\Fixture\\future-models", service: null,
     managedService: false, canStop: false, starting: false, stopReason: "", job: null,
     legacyDefault: "small", legacyModels: ["small", "medium"], catalog: { checkedAt: 0, errors: [] },
     models: [
-      { id: "small", name: "Whisper small", installed: true, owned: false, bytes: 100 * 1048576, path: "E:\\Fixture\\legacy-small", japaneseSupported: true, language: "多语言（含日语）", positioning: "较小模型，速度优先" },
-      { id: "medium", name: "Whisper medium", installed: true, owned: false, bytes: 200 * 1048576, path: "E:\\Fixture\\legacy-medium", japaneseSupported: true, language: "多语言（含日语）", positioning: "较慢，兼顾识别能力" },
-      { id: "imported-ja-demo", name: "导入的兼容日语模型", installed: true, owned: false, bytes: 42 * 1048576, path: "E:\\Fixture\\imported-view-path", japaneseSupported: true, language: "多语言（含日语）", positioning: "已安装原位复用" },
-      { id: "base.en", name: "Whisper base.en", installed: true, owned: true, bytes: 80 * 1048576, path: "E:\\Fixture\\english", japaneseSupported: false, language: "仅英语", positioning: "不适用于日语字幕" },
-      { id: "large-v2", name: "Whisper large-v2", installed: false, owned: false, bytes: 2900 * 1048576, japaneseSupported: true, language: "多语言（含日语）", positioning: "较大模型，硬件负担更高", source: "https://huggingface.co/Systran/faster-whisper-large-v2" }
+      { id: "small", name: "Whisper small", installed: true, owned: false, bytes: 100 * 1048576, path: "E:\\Fixture\\legacy-small", japaneseSupported: true, englishSupported: true, language: "多语言（含日语）", positioning: "较小模型，速度优先" },
+      { id: "medium", name: "Whisper medium", installed: true, owned: false, bytes: 200 * 1048576, path: "E:\\Fixture\\legacy-medium", japaneseSupported: true, englishSupported: true, language: "多语言（含日语）", positioning: "较慢，兼顾识别能力" },
+      { id: "imported-ja-demo", name: "导入的兼容日语模型", installed: true, owned: false, bytes: 42 * 1048576, path: "E:\\Fixture\\imported-view-path", japaneseSupported: true, englishSupported: false, language: "多语言（含日语）", positioning: "已安装原位复用" },
+      { id: "base.en", name: "Whisper base.en", installed: true, owned: true, bytes: 80 * 1048576, path: "E:\\Fixture\\english", japaneseSupported: false, englishSupported: true, language: "仅英语", positioning: "不适用于日语字幕" },
+      { id: "large-v2", name: "Whisper large-v2", installed: false, owned: false, bytes: 2900 * 1048576, japaneseSupported: true, englishSupported: true, language: "多语言（含日语）", positioning: "较大模型，硬件负担更高", source: "https://huggingface.co/Systran/faster-whisper-large-v2" }
     ]
   };
 }
@@ -32,8 +32,9 @@ describe("model manager settings UI independent review", () => {
   const card = (id: string) => [...$("models").querySelectorAll<HTMLElement>(".model-card")].find(node => node.dataset.model === id)!;
   const button = (id: string, label: string) => [...card(id).querySelectorAll<HTMLButtonElement>("button")].find(node => node.textContent === label)!;
   async function click(id: string) { $(id).click(); await flush(); }
-  async function open(value = fixture(), saved = "medium") {
-    state = copy(value); storage.set(settingsKey, { asrModel: saved, model: "fixture-provider", apiKey: "fixture-not-a-real-key", retainedPreference: true });
+  async function open(value = fixture(), saved = "medium", sourceLanguage: "ja" | "en" = "ja") {
+    state = copy(value); storage.set(settingsKey, { asrModel: saved, sourceLanguage, model: "fixture-provider", apiKey: "fixture-not-a-real-key", retainedPreference: true });
+    $<HTMLSelectElement>("defaultSourceLanguage").value = sourceLanguage;
     setupModelManager(); await flush();
   }
   function select(id: string, value: string) { $<HTMLSelectElement>(id).value = value; $(id).dispatchEvent(new Event("change", { bubbles: true })); }
@@ -57,9 +58,9 @@ describe("model manager settings UI independent review", () => {
     const old = fixture() as any; delete old.protocolVersion; delete old.version; delete old.catalog; delete old.legacyDefault; delete old.legacyModels;
     await open(old);
     expect($("connectionHelp").hidden).toBe(true); expect($("managerUpgrade").hidden).toBe(false);
-    expect($("managerUpgrade").textContent).toContain("1.1.0");
+    expect($("managerUpgrade").textContent).toContain("1.2.0");
     expect($("managerUpgrade").textContent).toContain("Install-Connection.cmd");
-    expect($("managerUpgrade").textContent).toContain("无需停止");
+    expect($("managerUpgrade").textContent).toContain("运行中的识别服务保持不变");
     expect($<HTMLButtonElement>("managerCatalog").disabled).toBe(true);
     expect($<HTMLButtonElement>("managerImport").disabled).toBe(true);
     expect(button("small", "删除模型文件").disabled).toBe(true);
@@ -83,7 +84,7 @@ describe("model manager settings UI independent review", () => {
     expect((storage.get(settingsKey) as any).asrModel).toBe("medium");
     expect(actions().every(action => action === "status")).toBe(true);
     await click("managerStart");
-    expect(requests("start").at(-1).args).toEqual({ model: "imported-ja-demo" });
+    expect(requests("start").at(-1).args).toEqual({ model: "imported-ja-demo", language: "ja" });
     expect(requests("download")).toHaveLength(0);
   });
 
@@ -171,5 +172,63 @@ describe("model manager settings UI independent review", () => {
     expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("base.en");
     select("modelFilter", "installed"); expect(card("large-v2")).toBeUndefined();
     expect(actions()).toEqual(["status"]);
+  });
+
+  it.each([
+    { name: "no running service", service: null, hidden: true },
+    { name: "missing window capability", service: { backend: { model: "small" } }, hidden: false },
+    { name: "Japanese-only window service", service: { backend: { model: "small" }, window_languages: ["ja"] }, hidden: false },
+    { name: "Japanese and English window service", service: { backend: { model: "small" }, window_languages: ["ja", "en"] }, hidden: true }
+  ])("bases the running-service upgrade notice on window_languages: $name", async ({ service, hidden }) => {
+    const current: any = fixture(); current.service = service;
+    await open(current);
+    expect($("managerUpgrade").hidden).toBe(hidden);
+    if (!hidden) expect($("managerUpgrade").textContent).toContain("手动接管或重启");
+    expect(actions()).toEqual(["status"]);
+  });
+
+  it("filters verified English models and excludes unknown language capability from both default selectors", async () => {
+    const current: any = fixture();
+    current.models.push({ id: "unknown", name: "语言未知模型", installed: true, bytes: 1, japaneseSupported: null, englishSupported: null });
+    await open(current);
+    select("modelFilter", "en");
+    expect([...$("models").querySelectorAll<HTMLElement>(".model-card")].map(node => node.dataset.model)).toEqual(["small", "medium", "base.en", "large-v2"]);
+    expect(button("base.en", "设为默认").disabled).toBe(true);
+    select("modelFilter", "all"); expect(button("unknown", "设为默认").disabled).toBe(true);
+    expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("unknown");
+    select("defaultSourceLanguage", "en");
+    expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).toEqual(["small", "medium", "base.en"]);
+    expect(button("imported-ja-demo", "设为默认").disabled).toBe(true); expect(button("unknown", "设为默认").disabled).toBe(true);
+    expect(button("base.en", "设为默认").disabled).toBe(false);
+    expect(actions()).toEqual(["status"]);
+  });
+
+  it.each(["ja", "en"] as const)("forwards %s on setDefault, start, restart and handover without losing provider settings", async language => {
+    await open(fixture(), "medium", language);
+    select("modelFilter", "all");
+    const model = language === "en" ? "base.en" : "small";
+    button(model, "设为默认").click(); await flush();
+    expect(requests("setDefault").at(-1).args).toEqual({ model, language });
+    expect(storage.get(settingsKey)).toMatchObject({ sourceLanguage: language, asrModel: model, retainedPreference: true, model: "fixture-provider", apiKey: "fixture-not-a-real-key" });
+    await click("managerStart"); expect(requests("start").at(-1).args).toEqual({ model, language });
+    state.service = { backend: { model }, window_languages: ["ja", "en"], active: false, queue: 0 }; state.managedService = true; state.canStop = true;
+    await click("managerRefresh"); await click("managerRestart");
+    expect(requests("restart").at(-1).args).toEqual({ model, language });
+    state.managedService = false; await click("managerRefresh"); await click("managerHandover");
+    expect(requests("handover").at(-1).args).toEqual({ model, language, confirm: "other-consumers-paused" });
+    expect(confirmation).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("暂停其他使用者"));
+  });
+
+  it.each([undefined, 1, 2])("blocks English operations for old manager protocol %s before sending native commands", async protocolVersion => {
+    const old: any = fixture(); old.protocolVersion = protocolVersion; old.version = protocolVersion === 2 ? "1.1.0" : "1.0.0";
+    await open(old, "medium", "en"); select("modelFilter", "all");
+    button("base.en", "设为默认").click(); await flush();
+    await click("managerStart");
+    state.service = { backend: { model: "medium" }, active: false, queue: 0 }; state.managedService = true; state.canStop = true;
+    await click("managerRefresh"); await click("managerRestart");
+    state.managedService = false; await click("managerRefresh"); await click("managerHandover");
+    for (const action of ["setDefault", "start", "restart", "handover"]) expect(requests(action)).toHaveLength(0);
+    expect($("managerNote").textContent).toContain("1.2.0");
+    expect((storage.get(settingsKey) as any).asrModel).toBe("medium");
   });
 });

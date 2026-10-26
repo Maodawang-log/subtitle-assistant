@@ -4,7 +4,7 @@ export interface NativeBinding {
 }
 export interface NativeAudioSource {
  status:"ready";bvid:string;cid:string;title:string;duration:number;playableDuration:number;
- subtitleListPresent:boolean;japaneseTrackCount:number;
+ subtitleListPresent:boolean;japaneseTrackCount:number;englishTrackCount?:number;
  source:{url:string;backupUrls:string[]};binding:NativeBinding;
  audit:{exactUrlMatch:true;responseStatus:206;requestStart:number;epochStart:number;videoEpoch:number;cidPathMatch:true;previewSeconds:number|null;accessScope?:"preview"|"current-player"|"continued-playback";host:string};
 }
@@ -19,6 +19,7 @@ export function readNativeSourceResult(raw:unknown):NativeSourceResult {
  ||typeof raw.duration!=="number"||!Number.isFinite(raw.duration)||raw.duration<=0||typeof raw.playableDuration!=="number"||!Number.isFinite(raw.playableDuration)||raw.playableDuration<=0||raw.playableDuration>raw.duration
  ||typeof raw.subtitleListPresent!=="boolean"||typeof raw.japaneseTrackCount!=="number"||!Number.isInteger(raw.japaneseTrackCount)||raw.japaneseTrackCount<0||!record(raw.source)||typeof raw.source.url!=="string"
  ||!Array.isArray(raw.source.backupUrls)||!raw.source.backupUrls.every(u=>typeof u==="string")||!record(raw.binding)||!record(raw.audit))return no;
+ if(raw.englishTrackCount!==undefined&&(typeof raw.englishTrackCount!=="number"||!Number.isInteger(raw.englishTrackCount)||raw.englishTrackCount<0))return no;
  const b=raw.binding,a=raw.audit;
  if(!["documentId","routeKey","videoTag","mediaSrc"].every(k=>typeof b[k]==="string")||!["timeOrigin","routeEpoch","videoGeneration"].every(k=>typeof b[k]==="number"&&Number.isFinite(b[k]))
  ||a.exactUrlMatch!==true||a.responseStatus!==206||a.cidPathMatch!==true||typeof a.host!=="string"||!["requestStart","epochStart","videoEpoch"].every(k=>typeof a[k]==="number"&&Number.isFinite(a[k]))

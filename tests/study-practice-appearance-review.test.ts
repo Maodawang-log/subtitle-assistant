@@ -17,14 +17,14 @@ describe("subtitle appearance independent settings review", () => {
     for (const value of [undefined, null, {}, { size: "not-a-size", color: "url(https://invalid.test/color)" }, { size: NaN, color: "#fff;display:none" }, { size: Infinity }, { size: -Infinity }]) {
       expect(normalizeAppearance(value)).toEqual(DEFAULT_APPEARANCE);
     }
-    expect(normalizeAppearance({ size: -5, color: "#AABBCC" })).toEqual({ size: 16, color: "#aabbcc" });
-    expect(normalizeAppearance({ size: 80, color: "#112233" })).toEqual({ size: 52, color: "#112233" });
-    expect(normalizeAppearance({ size: "40", color: "#00aa55" })).toEqual({ size: 40, color: "#00aa55" });
+    expect(normalizeAppearance({ size: -5, color: "#AABBCC" })).toEqual({ mode: "auto", size: 16, color: "#aabbcc" });
+    expect(normalizeAppearance({ size: 80, color: "#112233" })).toEqual({ mode: "auto", size: 52, color: "#112233" });
+    expect(normalizeAppearance({ mode: "manual", size: "40", color: "#00aa55" })).toEqual({ mode: "manual", size: 40, color: "#00aa55" });
   });
 
   it("emits coordinated Japanese, Chinese and ruby sizes with a safe selected color", () => {
     const style = document.createElement("style");
-    style.textContent = appearanceCss({ size: 40, color: "#FFDDAA" }); document.body.append(style);
+    style.textContent = appearanceCss({ mode: "manual", size: 40, color: "#FFDDAA" }); document.body.append(style);
     const rules = [...style.sheet!.cssRules] as CSSStyleRule[];
     const japanese = rules.find(rule => rule.selectorText === ".ja")!;
     const chinese = rules.find(rule => rule.selectorText === ".zh")!;
@@ -40,21 +40,21 @@ describe("subtitle appearance independent settings review", () => {
 
   it("restores saved appearance and immediately saves edits without touching provider settings", async () => {
     const originalProvider = { apiKey: "fixture-not-a-real-key", model: "fixture-model", asrModel: "medium" };
-    const storage = new Map<string, unknown>([[APPEARANCE_KEY, { size: 36, color: "#aabbcc" }], ["biliscriptJapaneseSettings", originalProvider]]);
+    const storage = new Map<string, unknown>([[APPEARANCE_KEY, { mode: "manual", size: 36, color: "#aabbcc" }], ["biliscriptJapaneseSettings", originalProvider]]);
     const area = createMemoryStorageArea(storage);
     vi.stubGlobal("chrome", { storage: { local: area } });
-    document.body.innerHTML = '<input id="subtitleSize" type="range" min="16" max="52"><input id="subtitleSizeNumber" type="number"><input id="subtitleColor" type="color"><div id="appearancePreview"></div><p id="appearanceStatus"></p><button data-subtitle-color="#fff4b8">暖黄</button><button id="appearanceReset">恢复默认</button>';
+    document.body.innerHTML = '<select id="subtitleSizeMode"><option value="auto">自动</option><option value="manual">手动</option></select><input id="subtitleSize" type="range" min="16" max="52"><input id="subtitleSizeNumber" type="number"><input id="subtitleColor" type="color"><div id="appearancePreview"></div><p id="appearanceStatus"></p><button data-subtitle-color="#fff4b8">暖黄</button><button id="appearanceReset">恢复默认</button>';
     setupAppearance(); await flush();
     expect($<HTMLInputElement>("subtitleSize").value).toBe("36");
     expect($<HTMLInputElement>("subtitleSizeNumber").value).toBe("36");
     expect($<HTMLInputElement>("subtitleColor").value).toBe("#aabbcc");
     expect(area.set).not.toHaveBeenCalled();
     input("subtitleSize", "40"); input("subtitleSizeNumber", "34"); input("subtitleColor", "#0055aa"); await flush();
-    expect(storage.get(APPEARANCE_KEY)).toEqual({ size: 34, color: "#0055aa" });
+    expect(storage.get(APPEARANCE_KEY)).toEqual({ mode: "manual", size: 34, color: "#0055aa" });
     expect($<HTMLInputElement>("subtitleSize").value).toBe("34");
     expect($("appearancePreview").style.fontSize).toBe("34px");
     document.querySelector<HTMLButtonElement>("[data-subtitle-color]")!.click(); await flush();
-    expect(storage.get(APPEARANCE_KEY)).toEqual({ size: 34, color: "#fff4b8" });
+    expect(storage.get(APPEARANCE_KEY)).toEqual({ mode: "manual", size: 34, color: "#fff4b8" });
     $("appearanceReset").click(); await flush();
     expect(storage.get(APPEARANCE_KEY)).toEqual(DEFAULT_APPEARANCE);
     expect(storage.get("biliscriptJapaneseSettings")).toBe(originalProvider);

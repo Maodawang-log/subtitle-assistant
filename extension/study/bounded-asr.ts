@@ -244,7 +244,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     previous?.abort.abort();
     previousSession?.sourceAbort.abort();
     if (previousSession) previousSession.source = undefined;
-    status("disabled", "日语学习已关闭");
+    status("disabled", "字幕已关闭");
   }
 
   function desired(owner: Session): WindowSlot[] {
@@ -445,6 +445,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       status("error", "无法取得当前视频身份，请重新开启学习");
       return;
     }
+    if (input.language !== undefined && !["ja", "en"].includes(input.language)) { status("error", "请选择日语或英语原语言"); return; }
     const duration = Number(input.duration);
     const hasValidatedSource = input.validatedAudioSource !== undefined;
     const playableDuration = input.playableDuration;

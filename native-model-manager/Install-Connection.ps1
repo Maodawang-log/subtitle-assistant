@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess=$true)]
+﻿[CmdletBinding(SupportsShouldProcess=$true)]
 param([string[]]$ExtensionId=@(),[string]$InstallDirectory='',[string]$LegacyBase='E:\Work\日语视频学习插件\local-asr')
 $ErrorActionPreference='Stop'
 function Get-PackageHash([string]$path) {
@@ -28,7 +28,7 @@ if($registered.Count -eq 1) {
  $InstallDirectory=$registeredHome
  if(!$PSBoundParameters.ContainsKey('LegacyBase')) { $LegacyBase=(Get-Content -LiteralPath (Join-Path $registeredHome 'host-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json).legacyBase }
 }
-if(!$InstallDirectory) {$InstallDirectory='E:\Work\日语视频学习插件\local-asr\model-manager-1.1.0'}
+if(!$InstallDirectory) {$InstallDirectory='E:\Work\日语视频学习插件\local-asr\model-manager-1.2.0'}
 $destination=Assert-LocalPath $InstallDirectory
 $base=Assert-LocalPath $LegacyBase
 $python=Join-Path $base '.venv\Scripts\python.exe'
@@ -99,5 +99,5 @@ foreach($path in $registryPaths) { New-Item -Path $path -Force | Out-Null;Set-It
  if($restoreErrors.Count){throw ('更新失败，部分文件需要从备份恢复：'+$codeBackup+'；'+($restoreErrors -join ', '))}
  throw ('更新失败，已恢复原配套和注册：'+$failure.Exception.Message)
 }
-Write-Host '1.1.0 连接完成。原管理状态、服务记录与模型保持不变。回到插件设置页点击“刷新状态”。'
+Write-Host '1.2.0 连接完成。原管理状态、服务记录与模型保持不变。回到插件设置页点击“刷新状态”。'
 } finally {if($gate) {$gate.Dispose()}}

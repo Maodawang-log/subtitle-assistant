@@ -31,7 +31,7 @@ class RootManagerReview(unittest.TestCase):
             'tokenizer.json': b'{"model":{"type":"BPE","vocab":{"<|ja|>":50266}},"added_tokens":[]}',
             'vocabulary.txt': b'fixture-vocabulary'
         }
-        self.release = {'repo': 'Systran/fixture', 'revision': 'a' * 40, 'name': 'Fixture', 'files': {
+        self.release = {'repo': 'Systran/fixture', 'revision': 'a' * 40, 'name': 'Fixture', 'japaneseSupported': True, 'englishSupported': False, 'files': {
             name: {'bytes': len(value), 'sha256': hashlib.sha256(value).hexdigest()} for name, value in self.files.items()
         }}
         self.model(self.legacy / 'models' / 'faster-whisper-medium')

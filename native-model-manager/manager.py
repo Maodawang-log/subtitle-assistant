@@ -101,6 +101,7 @@ class Manager:
         self.catalog.update(self.catalog_state.get('models', {}))
         self.catalog.update({key: value for key, value in self.state['installations'].items() if key not in self.catalog})
         self.delete_tokens = {}
+        self.language_cache = {}
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.job = None
@@ -141,7 +142,33 @@ class Manager:
                 result[model] = {'path': managed, 'owned': self.owns(Path(managed), model), 'release': frozen}
             elif model in self.base_catalog and model_files_valid(legacy, self.base_catalog[model]):
                 result[model] = {'path': str(legacy), 'owned': False, 'release': self.base_catalog[model]}
+        # Reinspect old local imports whose language flags predate English-only
+        # tokenizer detection. Cache by file identity; never rewrite their data.
+        from model_files import inspect_model, file_identity
+        for entry in result.values():
+            release=entry['release']
+            if release.get('source')=='local-import' or 'englishSupported' not in release or 'japaneseSupported' not in release:
+                path=Path(entry['path'])
+                try:
+                    signature=tuple(tuple(file_identity(path/name)) for name in ('model.bin','config.json','tokenizer.json'))
+                    cached=self.language_cache.get(str(path))
+                    if not cached or cached[0]!=signature:
+                        checked=inspect_model(path,safe_path)
+                        cached=(signature,{key:checked[key] for key in ('japaneseSupported','englishSupported','language')})
+                        self.language_cache[str(path)]=cached
+                    entry['release']={**release,**cached[1]}
+                except (OSError,ValueError,KeyError):
+                    entry['release']={**release,'japaneseSupported':False,'englishSupported':False,'language':'语言未确认'}
         return result
+
+    def check_language(self, model, language='ja'):
+        if language not in ('ja','en'):raise ValueError('请选择日语或英语原语言。')
+        installed=self.installed()
+        if model not in installed:raise ValueError('请先安装所选模型。')
+        capability='englishSupported' if language=='en' else 'japaneseSupported'
+        if installed[model]['release'].get(capability) is not True:
+            raise ValueError('此模型未确认支持'+('英语' if language=='en' else '日语')+'，不能用于所选原语言。')
+        return installed
 
     def owns(self, path, model):
         try:
@@ -166,8 +193,8 @@ class Manager:
             models=[]
             for model, latest in self.catalog.items():
                 item=installed.get(model, {});release=item.get('release', latest)
-                models.append({'id':model,'name':release['name'],'bytes':sum(f['bytes'] for f in release['files'].values()),'revision':release['revision'],'availableRevision':latest['revision'],'source':'https://huggingface.co/'+release['repo'] if release.get('repo') else '', 'language':release.get('language','多语言（含日语）'),'japaneseSupported':release.get('japaneseSupported',True),'positioning':release.get('positioning','已有兼容模型；实际速度与效果取决于设备和音频。'), **{key:value for key,value in item.items() if key!='release'},'installed':model in installed})
-            return {'version': '1.1.0', 'protocolVersion':2,'capabilities':['onlineCatalog','importModel','deletePreview','legacyDefault'], 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
+                models.append({'id':model,'name':release['name'],'bytes':sum(f['bytes'] for f in release['files'].values()),'revision':release['revision'],'availableRevision':latest['revision'],'source':'https://huggingface.co/'+release['repo'] if release.get('repo') else '', 'language':release.get('language','语言未确认'),'japaneseSupported':release.get('japaneseSupported') is True,'englishSupported':release.get('englishSupported') is True,'positioning':release.get('positioning','已有兼容模型；实际速度与效果取决于设备和音频。'), **{key:value for key,value in item.items() if key!='release'},'installed':model in installed})
+            return {'version': '1.2.0', 'protocolVersion':3,'capabilities':['onlineCatalog','importModel','deletePreview','legacyDefault','sourceLanguage'], 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
                     'legacyDefault':legacy.get('default_model','small'),'legacyModels':[key for key,item in installed.items() if key in self.base_catalog and Path(item['path'])==self.legacy/'models'/('faster-whisper-'+key)],
                     'catalog':{key:value for key,value in self.catalog_state.items() if key!='models'},'models':models,
                     'service': health, 'managedService': owned, 'canStop': stopping, 'starting': starting,
@@ -251,13 +278,10 @@ class Manager:
             window.destroy()
         return self.select_directory(selected) if selected else self.status()
 
-    def set_default(self, model):
+    def set_default(self, model, language='ja'):
         with self.lock:
             self.idle()
-            installed=self.installed()
-            if model not in installed:
-                raise ValueError('请先安装所选模型。')
-            if installed[model]['release'].get('japaneseSupported') is False:raise ValueError('此模型未确认支持日语，不能设为日语字幕默认。')
+            self.check_language(model,language)
             self.state['default_model'] = model; self.save()
             return self.status()
 
@@ -399,13 +423,16 @@ class Manager:
                 if alias.startswith('local-'):self.catalog.pop(alias,None)
             self.save();return self.status()
 
-    def start(self, model=None):
+    def start(self, model=None, language='ja'):
         with self.lock:
             self.idle()
+            if language not in ('ja','en'):raise ValueError('请选择日语或英语原语言。')
             health = self.health()
-            if health:
-                if health.get('foreign'): raise ValueError('本地端口已由其他服务占用。')
-                return self.status()
+            if health and health.get('foreign'):raise ValueError('本地端口已由其他服务占用。')
+            legacy = read_json(self.legacy / 'settings.json', {})
+            model = model or self.state.get('default_model', legacy.get('default_model', 'small'))
+            installed = self.check_language(model,language)
+            if health:return self.status()
             service = read_json(self.home / 'managed-service.json', {})
             if service.get('pid') and process_stamp(service['pid']) == service.get('stamp'):
                 return {**self.status(), 'starting': True}
@@ -417,7 +444,6 @@ class Manager:
             installed = self.installed();legacy = read_json(self.legacy / 'settings.json', {})
             model = model or self.state.get('default_model', legacy.get('default_model', 'small'))
             if model not in installed: raise ValueError('默认模型尚未安装。')
-            if installed[model]['release'].get('japaneseSupported') is False:raise ValueError('此模型未确认支持日语，不能作为日语服务默认启动。')
             python = safe_path(self.legacy / '.venv/Scripts/python.exe', self.legacy)
             server = safe_path(self.home / 'service/server.py', self.home)
             if not python.is_file() or not server.is_file(): raise ValueError('配套 Python 环境或服务文件不完整。')
@@ -450,13 +476,14 @@ class Manager:
                 (self.home / 'stop-intent.json').unlink(missing_ok=True)
             return self.status()
 
-    def handover(self, model, confirm):
+    def handover(self, model, confirm, language='ja'):
         with self.lock:
             self.idle()
             if confirm != 'other-consumers-paused':
                 raise ValueError('首次接管前，请确认其他使用本地识别的应用已暂停。')
+            self.check_language(model,language)
             health = self.health()
-            if not health: return self.start(model)
+            if not health: return self.start(model,language)
             if health.get('manager_instance'): return self.status()
             if health.get('base_path', '').casefold() != str(self.legacy).casefold() or health.get('active') or health.get('queue'):
                 raise ValueError('无法确认旧服务身份，或服务仍在工作；未接管。')
@@ -469,17 +496,17 @@ class Manager:
             for _ in range(20):
                 if not self.health(): break
                 time.sleep(.1)
-            return self.start(model)
+            return self.start(model,language)
 
     def dispatch(self, action, args):
-        allowed = {'status': set(), 'chooseDirectory': set(), 'refreshCatalog':set(), 'chooseImport':set(), 'prepareDelete':{'model'}, 'setLegacyDefault':{'model','confirm'}, 'download': {'model'}, 'cancel': set(), 'setDefault': {'model'}, 'delete': {'model', 'confirm'}, 'start': {'model'}, 'stop': set(), 'handover': {'model', 'confirm'}, 'restart': {'model'}}
+        allowed = {'status': set(), 'chooseDirectory': set(), 'refreshCatalog':set(), 'chooseImport':set(), 'prepareDelete':{'model'}, 'setLegacyDefault':{'model','confirm'}, 'download': {'model'}, 'cancel': set(), 'setDefault': {'model','language'}, 'delete': {'model', 'confirm'}, 'start': {'model','language'}, 'stop': set(), 'handover': {'model', 'confirm','language'}, 'restart': {'model','language'}}
         if action not in allowed or not isinstance(args, dict) or set(args) - allowed[action]:
             raise ValueError('不支持的管理操作或参数。')
         if 'model' in args and args['model'] not in self.catalog: raise ValueError('未知模型。')
-        return {'status': lambda: self.status(), 'chooseDirectory': lambda: self.choose_directory(), 'refreshCatalog':lambda:self.refresh_catalog(), 'chooseImport':lambda:self.choose_import(), 'prepareDelete':lambda:self.prepare_delete(args['model']), 'setLegacyDefault':lambda:self.set_legacy_default(args['model'],args.get('confirm')), 'download': lambda: self.download(args['model']), 'cancel': lambda: self.cancel_download(), 'setDefault': lambda: self.set_default(args['model']), 'delete': lambda: self.delete(args['model'], args.get('confirm')), 'start': lambda: self.start(args.get('model')), 'stop': lambda: self.stop(), 'handover': lambda: self.handover(args.get('model'), args.get('confirm')), 'restart': lambda: self.restart(args['model'])}[action]()
+        return {'status': lambda: self.status(), 'chooseDirectory': lambda: self.choose_directory(), 'refreshCatalog':lambda:self.refresh_catalog(), 'chooseImport':lambda:self.choose_import(), 'prepareDelete':lambda:self.prepare_delete(args['model']), 'setLegacyDefault':lambda:self.set_legacy_default(args['model'],args.get('confirm')), 'download': lambda: self.download(args['model']), 'cancel': lambda: self.cancel_download(), 'setDefault': lambda: self.set_default(args['model'],args.get('language','ja')), 'delete': lambda: self.delete(args['model'], args.get('confirm')), 'start': lambda: self.start(args.get('model'),args.get('language','ja')), 'stop': lambda: self.stop(), 'handover': lambda: self.handover(args.get('model'), args.get('confirm'),args.get('language','ja')), 'restart': lambda: self.restart(args['model'],args.get('language','ja'))}[action]()
 
-    def restart(self, model):
+    def restart(self, model, language='ja'):
         with self.lock:
-            if model not in self.installed(): raise ValueError('所选模型尚未安装。')
+            self.check_language(model,language)
             self.stop()
-            return self.start(model)
+            return self.start(model,language)

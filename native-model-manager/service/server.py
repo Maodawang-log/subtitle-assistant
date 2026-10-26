@@ -1,4 +1,4 @@
-"""Loopback-only OpenAI-compatible Japanese ASR with a cancellable GPU worker."""
+"""Loopback-only OpenAI-compatible multilingual ASR with a cancellable GPU worker."""
 from __future__ import annotations
 
 import asyncio
@@ -90,7 +90,7 @@ def load_model(device, model_id):
                          cpu_threads=6, num_workers=1, local_files_only=True)
     # Loading a model does not exercise cuDNN. Warm it with an actual 1s decode.
     import numpy as np
-    chunks, _ = model.transcribe(np.zeros(16000, dtype=np.float32), language="ja", beam_size=1,
+    chunks, _ = model.transcribe(np.zeros(16000, dtype=np.float32), language="ja" if "ja" in model.supported_languages else "en", task="transcribe", beam_size=1,
                                 vad_filter=False, condition_on_previous_text=False)
     list(chunks)
     return model, compute_type
@@ -145,6 +145,8 @@ def gpu_worker(pipe, preferred, model_id):
                 break
             started = time.perf_counter()
             try:
+                if job["language"] is not None and job["language"] not in model.supported_languages:
+                    raise ValueError("The selected model does not support the requested language")
                 download = None
                 if job.get("window"):
                     from window_audio import decode_window
@@ -164,7 +166,7 @@ def gpu_worker(pipe, preferred, model_id):
                         segments.append({"id": len(segments), **cue})
                 result = {
                     "task": "transcribe", "language": info.language, "duration": round(duration, 3),
-                    "text": "".join(s["text"] for s in segments), "segments": segments,
+                    "text": (" " if info.language == "en" else "").join(s["text"] for s in segments), "segments": segments,
                     "model": model_id, "device": device, "compute_type": compute,
                     "processing_seconds": round(time.perf_counter() - started, 3),
                 }
@@ -335,7 +337,7 @@ async def lifespan(app):
         await asyncio.to_thread(engine.stop)
 
 
-app = FastAPI(title="Local Japanese ASR", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Local Subtitle ASR", version="1.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
     allow_origin_regex=r"^chrome-extension://[a-p]{32}$",
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -405,6 +407,7 @@ async def shared_consumer_guard(request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok" if engine.last_backend else "model_unavailable", "service": "local-japanese-asr",
+            "version": "1.2.0", "window_languages": ["ja", "en"],
             "base_path": str(BASE), "default_model": MODEL_ID, "manager_instance": MANAGER_INSTANCE,
             "other_consumer_recent": bool(OTHER_CONSUMER_AT and time.time() - OTHER_CONSUMER_AT < 900),
             "available_models": [name for name, path in MODEL_DIRS.items() if (path / "model.bin").is_file()],
@@ -512,8 +515,9 @@ async def window(request: Request):
         raise EngineError(429, "Local ASR queue is full; retry later")
     data = await read_small_json(request)
     request_id = validate_request_id(data)
-    if data.get("language", "ja") != "ja":
-        raise EngineError(400, "The bounded Japanese study endpoint requires language=ja")
+    language = data.get("language", "ja")
+    if language not in ("ja", "en"):
+        raise EngineError(400, "The bounded study endpoint requires language=ja or en")
     model = requested_model(data.get("model"))
     try:
         start, duration = float(data.get("start", -1)), float(data.get("duration", -1))
@@ -536,7 +540,7 @@ async def window(request: Request):
         # JSON permits whitespace before the one final object; flush immediately
         # and keep the body alive while the bounded worker is running.
         yield b"\n"
-        task = asyncio.create_task(engine.transcribe(None, "ja", request, model_id=model, window={
+        task = asyncio.create_task(engine.transcribe(None, language, request, model_id=model, window={
             "window": True, "request_id": request_id, "urls": urls, "start": start, "duration": duration,
         }))
         try:

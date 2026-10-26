@@ -24,7 +24,10 @@
         "sha256": "329373481008c7c38654aff8ecdcf0163c211557cc7ba8e2ef6f2f84b4f75ec8"
       }
     },
-    "name": "Whisper small"
+    "name": "Whisper small",
+    "japaneseSupported": true,
+    "englishSupported": true,
+    "language": "多语言（日语、英语）"
   },
   "medium": {
     "repo": "Systran/faster-whisper-medium",
@@ -51,7 +54,10 @@
         "sha256": "a30144a6232423e5e4e9e17952b5a543a506dc0cb9de02fd9d875d7ec40fef83"
       }
     },
-    "name": "Whisper medium"
+    "name": "Whisper medium",
+    "japaneseSupported": true,
+    "englishSupported": true,
+    "language": "多语言（日语、英语）"
   },
   "large-v3-turbo": {
     "name": "Whisper large-v3-turbo",
@@ -78,6 +84,9 @@
         "bytes": 1068114,
         "sha256": "c69260f2ab26d659b7c398f9a2b2b48ed0df16c3b47d7326782fd9cba71690c1"
       }
-    }
+    },
+    "japaneseSupported": true,
+    "englishSupported": true,
+    "language": "多语言（日语、英语）"
   }
 }

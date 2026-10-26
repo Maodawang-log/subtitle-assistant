@@ -77,7 +77,7 @@ beforeEach(async () => {
   } : message.type === "study-ai" ? aiReply(message) : { ok: true });
   vi.stubGlobal("chrome", {
     runtime: { getURL: (path: string) => `chrome-extension://review/${path}`, sendMessage: send, onMessage: { addListener: vi.fn() } },
-    storage: { local: createMemoryStorageArea(), onChanged: { addListener: (listener: any) => storageListeners.push(listener) } }
+    storage: { local: createMemoryStorageArea(), onChanged: { addListener: (listener: any) => { if (!storageListeners.includes(listener)) storageListeners.push(listener); }, removeListener: (listener: any) => { storageListeners = storageListeners.filter(item => item !== listener); } } }
   });
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({}) })));
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));

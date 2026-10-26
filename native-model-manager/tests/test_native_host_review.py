@@ -39,7 +39,7 @@ class NativeHostReview(unittest.TestCase):
         self.legacy = self.root / 'asr'
         self.legacy.mkdir()
         shutil.copy2(self.exe, self.home / 'native-host.exe')
-        for name in ['manager.py', 'host.py']:
+        for name in ['manager.py', 'host.py', 'catalog.py', 'model_files.py']:
             shutil.copy2(NATIVE / name, self.home / name)
         (self.home / 'python-path.txt').write_text(sys.executable, encoding='utf-8')
         (self.home / 'host-config.json').write_text(json.dumps({'legacyBase': str(self.legacy)}))
