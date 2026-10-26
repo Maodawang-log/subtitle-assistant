@@ -42,3 +42,15 @@
 :host([data-fullscreen]) .toolbar{padding:10px 12px;border:1px solid #ffffff26;border-radius:12px;background:#18291fdb}
 :host([data-fullscreen]) #status{margin:8px 5px 0}
 @media(max-width:800px){:host(#biliscript-japanese-study[data-fullscreen]){max-width:80vw!important}.transport{padding-right:0}}
+
+/* Selectable glyph spans keep native drag selection across words and ruby. */
+[data-study-text],.token,.token ruby,.token rb{user-select:text!important;-webkit-user-select:text!important;cursor:text}
+.token{display:inline;touch-action:auto;border-radius:4px}.token rt{user-select:none;-webkit-user-select:none}
+.head{justify-content:flex-end;padding:8px 12px}.head #enable{margin-right:auto}
+.tabs{gap:2px;padding:0 8px}.tabs button{padding:9px 10px;flex:1;white-space:nowrap}
+.word-heading{display:flex;gap:10px;align-items:center}.word-heading h2{flex:1;font-size:21px;margin:2px 0}
+.word-star{font-size:26px;padding:0 8px;border:0;background:transparent;color:#8b9b8e}.word-star[aria-pressed=true]{color:#d28a00}
+.word-reading{margin:4px 0 8px}.word-meaning{white-space:normal;line-height:1.6}.word-meaning p{padding-bottom:7px;margin:4px 0 8px}.word-meaning p>div{white-space:pre-wrap}
+.word-card{padding:8px 0 16px;border-bottom:1px solid var(--line)}.saved-word p{max-height:none;overflow:visible}.saved-word .source-link{display:block;white-space:normal;color:var(--green);font-size:12px}.saved-word .source-sentence{color:var(--muted)}
+.setup-link{margin:8px 0}.selection-source{white-space:pre-wrap;color:var(--muted);font-size:13px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.saved-word summary{cursor:pointer;padding-right:42px}.saved-preview{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:12px;line-height:1.6;color:var(--muted);white-space:pre-wrap;margin-top:5px}.saved-word details[open] .saved-preview{display:none}

@@ -5,17 +5,24 @@ import { createBoundedAsrController, requestStudyAudioWindow } from "./bounded-a
 import { getNativeStudySource, sameNativeBinding } from "./native-source.js";
 import { createStudyShell } from "./ui-shell.js";
 import { createInlineRecorder } from "./inline-recorder.js";
-import { renderDictionaryResults } from "./dictionary-view.js";
+import { createWordPanel } from "./word-panel.js";
+import { createSubtitleSelection } from "./subtitle-selection.js";
 import { renderMarkdown } from "../ui/markdown.js";
 (()=>{
  if(document.getElementById("biliscript-japanese-study"))return;
  const ui=createStudyShell(),{host,controls,shadow,wrap,$}=ui,send=m=>chrome.runtime.sendMessage(m);
- let enabled=false,generation=0,route="",identity="",clip=null,cues=[],chinese=[],selected=0,active=-1,offset=0,video=null,player=null,abort=null,settings={autoStart:false,autoTranslate:true,configured:false};
+ let bilingual=false,translationEpoch=0,detailEpoch=0;
+ let enabled=false,generation=0,route="",identity="",clip=null,cues=[],chinese=[],selected=0,active=-1,offset=0,video=null,player=null,abort=null,settings={autoStart:false,autoTranslate:false,configured:false};
  let tokenizer=null,tokenPromise=null,words={},basic={},overlay=null,overlayRoot=null,overlaySignature="",panelText="",loading=false,aiBusy=false,automaticBusy=false,waiting=false,resumeAfter=false,asrMode=false,lookupId="";
  const translations=new Map(),attempted=new Set();
  let recognizedWindows=[],asrError=false,aiEpoch=0,automaticFailed=false,nativeMode=false,nativeSession=null,nativeSeekEpoch=0;
- let scopeWaiting=false,nativeRefreshPending=false,lastNativeCheck=0,vocabulary=[],lookupEpoch=0,followRows=true;
+ let scopeWaiting=false,nativeRefreshPending=false,lastNativeCheck=0,lookupEpoch=0,followRows=true;
  const currentElement=$("current"),chineseElement=$("chinese");
+ const binding=()=>generation+"|"+(identity||route);
+ const wordPanel=createWordPanel(ui,{binding,lookup:queries=>send({type:"study-dictionary-lookup",language:"ja",queries}),fallback:(lemma,surface)=>words[lemma]||words[surface]||basic[lemma]||basic[surface],error:e=>status(e.message,true),explain:(token,source)=>safe(()=>{if(!source||source.resource!==(identity||route))return;const index=cues.findIndex(c=>c.text===source.sentence&&Math.abs(c.start+offset-source.time)<.01);if(index>=0)return explainSelection({text:token.surface_form,index,first:cueKey(cues[index])},binding(),"word")})});
+ const selection=createSubtitleSelection({binding,onDrag:()=>video?.pause(),onSelect:(value,source)=>safe(()=>explainSelection(value,source))});
+ selection.bind($("rows"));
+ const sourceFor=c=>({sentence:c.text,url:location.href,time:Math.max(0,c.start+offset),resource:identity||route});
  const recorder=createInlineRecorder(ui,async c=>{guard();loopOff();await player.play(c)},()=>{loopOff();video?.pause()});
  host.addEventListener("study-layout",()=>updateOverlay(video?JSTUDY.at(cues,video.currentTime-offset):-1));
  const windowReady=time=>recognizedWindows.some(w=>time>=w.start&&time<w.end);
@@ -24,14 +31,14 @@ import { renderMarkdown } from "../ui/markdown.js";
  const cueKey=c=>c.start.toFixed(2)+":"+c.end.toFixed(2)+":"+c.text;
  const safe=fn=>Promise.resolve().then(fn).catch(e=>{if(e.name!=="AbortError")status(e.message||String(e),true)});
  function loopOff(){player?.clear();$("loop").textContent="循环：关";$("loop").classList.remove("on");$("loop").setAttribute("aria-pressed","false")}
- function guard(){if(!enabled)throw new Error("请先开启当前视频的学习");if(!cues.length)throw new Error("当前时刻字幕尚未就绪，请等待本地识别或导入字幕");if(!video)throw new Error("找不到视频播放器");return cues[selected]}
+ function guard(){if(!enabled)throw new Error("请先开启当前视频的字幕");if(!cues.length)throw new Error("当前时刻字幕尚未就绪，请等待本地识别或导入字幕");if(!video)throw new Error("找不到视频播放器");return cues[selected]}
  const shifted=c=>({...c,start:Math.max(0,c.start+offset),end:Math.max(.01,c.end+offset)});
  function nativeLive(n){return enabled&&currentRoute()===route&&n&&n.binding.routeKey===route&&video?.isConnected&&video.getAttribute("data-biliscript-study-binding")===n.binding.videoTag&&video.currentSrc===n.binding.mediaSrc}
  async function verifyNativeWindow(payload,signal,expected){
   if(signal.aborted||!nativeLive(expected)||nativeSession!==expected)throw new DOMException("播放资源已更新","AbortError");
   const fresh=await getNativeStudySource();
   if(signal.aborted||!nativeLive(expected)||nativeSession!==expected)throw new DOMException("播放资源已更新","AbortError");
-  if(fresh.status!=="ready"||!sameNativeBinding(fresh.binding,expected.binding)||fresh.bvid!==payload.bvid||fresh.cid!==payload.cid||fresh.source.url!==payload.audio_url||payload.start+payload.duration>fresh.playableDuration)throw new Error("当前音轨关联或可播放范围已改变，请重新开启学习。");
+  if(fresh.status!=="ready"||!sameNativeBinding(fresh.binding,expected.binding)||fresh.bvid!==payload.bvid||fresh.cid!==payload.cid||fresh.source.url!==payload.audio_url||payload.start+payload.duration>fresh.playableDuration)throw new Error("当前音轨关联或可播放范围已改变，请重新开启字幕。");
  }
  function startNative(n,preserve=false){
   asr.stop();nativeMode=true;nativeSession=n;nativeSeekEpoch++;clip={bvid:n.bvid,cid:n.cid,title:n.title};identity=n.bvid+":"+n.cid;
@@ -92,7 +99,7 @@ import { renderMarkdown } from "../ui/markdown.js";
    if(v!==video||!enabled)return;
    const owned=v.__biliscriptOwnedSeek;
    if(owned&&owned.until>=Date.now()&&Math.abs(v.currentTime-owned.time)<.4){updateAtTime(true);return;}
-   aiEpoch++;automaticBusy=false;send({type:"study-stop-ai"}).catch(()=>{});
+   aiEpoch++;detailEpoch++;attempted.clear();automaticBusy=false;send({type:"study-stop-ai"}).catch(()=>{});
    loopOff();active=-1;if(asrMode){asrError=false;if(nativeMode)safe(nativeSeek);else asr.seek(v.currentTime);waitForCurrent()}updateAtTime(true);
   });
  }
@@ -106,21 +113,23 @@ import { renderMarkdown } from "../ui/markdown.js";
   $("current").textContent="当前时刻字幕准备中…";$("chinese").textContent="";clearOverlay();status("正在准备当前30秒片段。起播/跳转需要等待，不会把缓冲进度当成音频。");
  }
  function clearOverlay(){overlay?.remove();overlay=null;overlayRoot=null;overlaySignature=""}
- function stop(reason="学习已关闭。字幕、音频和后续翻译任务已停止。"){
+ function stop(reason="字幕已关闭，识别和后续文字请求已停止。"){
+  bilingual=false;translationEpoch++;detailEpoch++;selection.reset();wordPanel.reset();$("translate").textContent="双语字幕：关";$("translate").setAttribute("aria-pressed","false");$("translate").classList.remove("on");
   recorder.clear();ui.setEnabled(false);scopeWaiting=false;lookupEpoch++;
   enabled=false;generation++;aiEpoch++;nativeMode=false;nativeSession=null;nativeSeekEpoch++;abort?.abort();abort=null;asr.stop();send({type:"study-stop-ai"}).catch(()=>{});loopOff();waiting=false;resumeAfter=false;asrMode=false;recognizedWindows=[];asrError=false;automaticFailed=false;loading=false;aiBusy=false;automaticBusy=false;
-  clearOverlay();$("enable").textContent="开启学习";$("show").textContent="开始学习";$("enable").classList.remove("on");status(reason);
+  clearOverlay();$("enable").textContent="开启字幕";$("show").textContent="开启字幕";$("enable").classList.remove("on");status(reason);
  }
  function reset(next){
-  stop("已换视频，学习默认关闭。");route=next;identity="";clip=null;cues=[];chinese=[];selected=0;active=-1;offset=0;$("offset").value="0";translations.clear();attempted.clear();panelText="";
+  stop("已换视频，字幕默认关闭。");route=next;identity="";clip=null;cues=[];chinese=[];selected=0;active=-1;offset=0;$("offset").value="0";translations.clear();attempted.clear();panelText="";
+  ui.setPane("subtitles");wordPanel.reset(true);$("detailTitle").textContent="本句讲解";$("explainScope").textContent="";$("detail").textContent="拖选字幕片段，或点击本句讲解。";
   $("rows").replaceChildren(currentElement,chineseElement);currentElement.textContent="开启后显示日语字幕";chineseElement.textContent="";$("position").textContent="未载入";$("track").replaceChildren(new Option("自动选择日语",""));
-  if(settings.autoStart&&next)safe(()=>start());
+
  }
  async function start(preferredTrackId=""){
   if(enabled&&loading)return;
   stop();enabled=true;const mine=++generation;abort=new AbortController();loading=true;
-  $("enable").textContent="停止学习";$("enable").classList.add("on");$("show").textContent="学习中 · 展开";wrap.classList.remove("fold");bindVideo();ui.setEnabled(true);ui.mount(video);
-  status("学习已开启，正在获取当前视频的日文字幕…");
+  $("enable").textContent="关闭字幕";$("enable").classList.add("on");$("show").textContent="关闭字幕";wrap.classList.remove("fold");bindVideo();ui.setEnabled(true);ui.mount(video);
+  status("字幕已开启，正在获取当前视频的日文字幕…");
   let nativeFallback=null;
   try{
    const publicSettings=await send({type:"study-settings-public"});if(mine!==generation||!enabled)return;settings={...settings,...publicSettings?.config};
@@ -139,20 +148,21 @@ import { renderMarkdown } from "../ui/markdown.js";
    $("track").value=result.selectedTrackId||"";
    if(result.status==="ready"){
     cues=JSTUDY.normalize(result.cues);chinese=JSTUDY.normalize(result.chineseCues||[]);
-    $("source").textContent="B站日文文本轨 · "+result.title;updateAtTime(true);status("日文字幕已就绪，播放器内显示原文及已有中文/按需译文。");
+    $("source").textContent="B站日文文本轨 · "+result.title;updateAtTime(true);status("日文字幕已就绪；可单独开启双语字幕。");
    }else{
     if(native.status==="ready"&&native.bvid===result.bvid&&native.cid===result.cid&&nativeLive(native)){startNative(native);return;}
     if(native.status==="unavailable"&&["PREVIEW_END","PREVIEW_UNKNOWN"].includes(native.reason))throw new Error(native.message);
     asrMode=true;$("source").textContent="本地 Whisper · "+result.title;waitForCurrent();
     asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:Number.isFinite(video?.duration)?video.duration:undefined,language:"ja",model:settings.asrModel||"small",resourceId:identity});
    }
-  }catch(e){if(enabled&&mine===generation&&e.name!=="AbortError")status(nativeFallback?.reason==="NO_PLAYED_AUDIO"?"尚未关联当前音轨。请先正常播放几秒，再点“重新取字幕”。":nativeFallback?.reason==="NO_MARKER"?"请刷新视频页后重新开启学习。":e.message,true)}
+  }catch(e){if(enabled&&mine===generation&&e.name!=="AbortError")status(nativeFallback?.reason==="NO_PLAYED_AUDIO"?"尚未关联当前音轨。请先正常播放几秒，再点“重新取字幕”。":nativeFallback?.reason==="NO_MARKER"?"请刷新视频页后重新开启字幕。":e.message,true)}
   finally{if(mine===generation)loading=false}
  }
  const fmt=t=>Math.floor(t/60)+":"+String(Math.floor(t%60)).padStart(2,"0");
- function chineseFor(c){return translations.get(cueKey(c))||JSTUDY.paired(c,chinese)||""}
+ function availableChinese(c){return translations.get(cueKey(c))||JSTUDY.paired(c,chinese)||""}
+ function chineseFor(c){return bilingual?availableChinese(c):""}
  function display(i,force=false){
-  if(!cues.length)return;selected=Math.max(0,Math.min(cues.length-1,i));const c=cues[selected];
+  if(!cues.length||selection.active)return;const previous=selected;selected=Math.max(0,Math.min(cues.length-1,i));const c=cues[selected];if(previous!==selected){detailEpoch++;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});}
   $("position").textContent=(selected+1)+" / "+cues.length+" · "+fmt(c.start);$("chinese").textContent=chineseFor(c);
   if(force||panelText!==cueKey(c)){panelText=cueKey(c);$("current").textContent=c.text;renderTokens(c,$("current"));renderRows();}
  }
@@ -163,8 +173,8 @@ import { renderMarkdown } from "../ui/markdown.js";
    const time=document.createElement("button");time.className="cue-time";time.textContent=fmt(c.start);time.title="选中并定位此句";
    time.onclick=()=>safe(async()=>{guard();loopOff();display(index);player.seekPause(shifted(c))});
    row.append(time);const text=document.createElement("div");text.className="cue-text";
-   if(index===selected){text.append(currentElement,chineseElement);currentElement.textContent=c.text;chineseElement.textContent=chineseFor(c);renderTokens(c,currentElement)}
-   else{const ja=document.createElement("div"),zh=document.createElement("div");ja.textContent=c.text;zh.className="cue-zh";zh.textContent=chineseFor(c);text.append(ja,zh);ja.onclick=()=>safe(async()=>{guard();loopOff();display(index);player.seekPause(shifted(c))})}
+   if(index===selected){text.append(currentElement,chineseElement);currentElement.textContent=c.text;currentElement.dataset.studyText="";currentElement.dataset.cue=cueKey(c);currentElement.dataset.index=String(index);chineseElement.textContent=chineseFor(c);renderTokens(c,currentElement)}
+   else{const ja=document.createElement("div"),zh=document.createElement("div");ja.textContent=c.text;ja.dataset.studyText="";ja.dataset.cue=cueKey(c);ja.dataset.index=String(index);zh.className="cue-zh";zh.textContent=chineseFor(c);text.append(ja,zh);renderTokens(c,ja,index)}
    row.append(text);rows.append(row);
   });
   rows.scrollTop=oldScroll;
@@ -175,38 +185,32 @@ import { renderMarkdown } from "../ui/markdown.js";
   tokenPromise=new Promise((resolve,reject)=>kuromoji.builder({dicPath:chrome.runtime.getURL("study/dict/")}).build((error,t)=>{if(error){tokenPromise=null;reject(new Error("本地日语词典载入失败，请重新加载扩展"))}else{tokenizer=t;resolve(t)}}));return tokenPromise;
  }
  function tokenElement(token,overlayStyle=false){
-  const b=document.createElement("button");b.className=overlayStyle?"jp-word":"token";const ruby=document.createElement("ruby");ruby.textContent=token.surface_form;
-  const reading=JSTUDY.hiragana(token.reading);if(reading&&reading!==token.surface_form){const rt=document.createElement("rt");rt.textContent=reading;ruby.append(rt)}b.append(ruby);b.onclick=e=>{e.stopPropagation();lookup(token)};return b;
+  const b=document.createElement("span");b.setAttribute("role","button");b.tabIndex=0;b.className=overlayStyle?"jp-word":"token";const ruby=document.createElement("ruby");ruby.textContent=token.surface_form;
+  const reading=JSTUDY.hiragana(token.reading);if(reading&&reading!==token.surface_form){const rt=document.createElement("rt");rt.textContent=reading;ruby.append(rt)}b.append(ruby);b.onclick=e=>{e.stopPropagation();if(selection.suppressClick())return;lookup(token,b)};b.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();lookup(token,b)}};return b;
  }
- async function renderTokens(c,target){
-  const mine=generation;try{const t=await getTokenizer();if(!enabled||mine!==generation||cues[selected]?.text!==c.text)return;target.replaceChildren(...t.tokenize(c.text).map(token=>tokenElement(token)));overlaySignature="";}
+ async function renderTokens(c,target,index=selected){
+  const mine=generation;try{const t=await getTokenizer();if(!enabled||mine!==generation||cues[index]?.text!==c.text||!target.isConnected||selection.active)return;target.dataset.studyText="";target.dataset.cue=cueKey(c);target.dataset.index=String(index);target.replaceChildren(...t.tokenize(c.text).map(token=>tokenElement(token)));overlaySignature="";}
   catch(e){if(enabled&&mine===generation)status(e.message,true)}
  }
- async function lookup(token){
-  if(!enabled)return;video?.pause();ui.setPane("vocabulary");lookupId=token.surface_form;const mine=++lookupEpoch;
-  const lemma=token.basic_form&&token.basic_form!=="*"?token.basic_form:token.surface_form,entry=words[lemma]||words[token.surface_form]||basic[lemma]||basic[token.surface_form];
-  const target=$("wordDetail");target.replaceChildren();
-  const title=document.createElement("h2");title.textContent=token.surface_form;
-  const info=document.createElement("p");info.className="word-reading";info.textContent=[JSTUDY.hiragana(token.reading||entry?.reading||""),"原形："+lemma,token.pos,JSTUDY.conjugation(token)].filter(Boolean).join(" · ");
-  const meaning=document.createElement("div");meaning.className="word-meaning";
-  meaning.textContent=entry?(typeof entry==="string"?entry:entry.meaning)+"（"+(words[lemma]||words[token.surface_form]?"导入词典":"基础词表")+"）":"正在查本地词典…";
-  const save=document.createElement("button");save.textContent="＋ 收藏生词";save.onclick=()=>safe(async()=>{const value={term:lemma,reading:JSTUDY.hiragana(token.reading),meaning:meaning.textContent,at:Date.now()};vocabulary=[value,...vocabulary.filter(x=>x.term!==lemma)].slice(0,1000);await chrome.storage.local.set({biliscriptStudyVocabulary:vocabulary});save.textContent="已收藏";renderVocabulary()});
-  const button=document.createElement("button");button.textContent="AI 词义与变形";button.onclick=()=>safe(()=>ask("word",token.surface_form));
-  target.append(title,info,meaning,save,button);
-  try{
-   const r=await send({type:"study-dictionary-lookup",language:"ja",queries:[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)].filter(Boolean)});
-   if(!enabled||mine!==lookupEpoch)return;
-   if(r?.ok&&r.entries?.length){
-    renderDictionaryResults(meaning,r.entries);
-   }else if(!entry)meaning.textContent=r?.ok?"当前日语默认词典未命中，或尚未安装。可在设置中选择词典。":r?.error||"本地词典暂时不可用。";
-  }catch{if(mine===lookupEpoch&&!entry)meaning.textContent="本地词典暂时不可用，请在设置中检查。"}
+ async function lookup(token,element){
+  if(!enabled)return;video?.pause();ui.setPane("vocabulary");const index=Number(element?.closest("[data-study-text]")?.dataset.index??selected);await wordPanel.show([token],cues[index]?sourceFor(cues[index]):undefined);
  }
- function renderVocabulary(){
-  $("wordList").replaceChildren();
-  for(const item of vocabulary){const card=document.createElement("div");card.className="saved-word";const title=document.createElement("strong");title.textContent=item.term+" "+item.reading;const meaning=document.createElement("p");meaning.textContent=item.meaning;const remove=document.createElement("button");remove.textContent="移除";remove.onclick=()=>safe(async()=>{vocabulary=vocabulary.filter(x=>x.term!==item.term);await chrome.storage.local.set({biliscriptStudyVocabulary:vocabulary});renderVocabulary()});card.append(title,remove,meaning);$("wordList").append(card)}
+ function setupMessage(target,message){target.replaceChildren();const p=document.createElement("p"),button=document.createElement("button");p.textContent=message;button.textContent="去设置";button.className="setup-link";button.onclick=()=>send({type:"study-open-options"});target.append(p,button)}
+ async function explainSelection(value,source,kind="explain"){
+  if(!enabled||source!==binding())return;
+  const index=value.index,c=cues[index];if(!c||cueKey(c)!==value.first)return;
+  const snapshot={cue:{...c},context:JSTUDY.context(cues,index),resource:identity||route};
+  video?.pause();const mine=++detailEpoch;aiBusy=false;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});send({type:"study-stop-ai",channel:"explanation"}).catch(()=>{});
+  ui.setPane("explanation");$("detailTitle").textContent=kind==="word"?"词义与变形":"选段讲解";$("explainScope").textContent=value.text;$("detail").textContent="正在讲解选中片段…";
+  void getTokenizer().then(t=>{if(mine===detailEpoch&&source===binding())return wordPanel.show(t.tokenize(value.text),{...sourceFor(c),selection:value.text})}).catch(e=>status(e.message,true));
+  const latest=await send({type:"study-settings-public"});if(mine!==detailEpoch||source!==binding())return;settings={...settings,...latest?.config};
+  if(!settings.configured){setupMessage($("detail"),"尚未配置文字接口。单词释义已在本地准备。");status("请先在设置中配置文字接口。",true);return;}
+  try{const result=await requestAI(kind,value.text,index,"selection","selection",snapshot);if(!result||mine!==detailEpoch||source!==binding())return;$("detail").innerHTML=renderMarkdown(result.text);if(result.warning){const p=document.createElement("p");p.className="error";p.textContent=result.warning;$("detail").prepend(p)}status(result.warning||(result.fromCache?"已使用讲解缓存。":"讲解已完成。"),!!result.warning)}
+  catch(e){if(mine===detailEpoch&&source===binding()){setupMessage($("detail"),e.message);status(e.message,true)}}
  }
  function updateOverlay(i){
-  if(!enabled||i<0||!video){clearOverlay();return;}
+  if(selection.active)return;
+  if(!enabled||i<0||!video||document.querySelector("#app[data-server-rendered]")){clearOverlay();return;}
   const c=cues[i],zh=chineseFor(c);
   const container=document.fullscreenElement&&document.fullscreenElement.tagName!=="VIDEO"?document.fullscreenElement:video.closest(".bpx-player-container,.bilibili-player,.html5-video-player")||video.parentElement;
   if(!container)return;
@@ -216,36 +220,36 @@ import { renderMarkdown } from "../ui/markdown.js";
   overlay.style.right=document.fullscreenElement&&!host.hidden?Math.max(0,host.getBoundingClientRect().width+40)+"px":"5%";
   if(signature===overlaySignature)return;overlaySignature=signature;
   overlayRoot.replaceChildren();
-  const style=document.createElement("style");style.textContent='*{box-sizing:border-box}.ja,.zh{text-align:center;line-height:1.65;color:white;text-shadow:1px 1px 3px #000,-1px -1px 3px #000,0 2px 8px #000;font-family:system-ui,"Meiryo",sans-serif;font-weight:600}.ja{font-size:clamp(20px,2.1vw,34px)}.zh{font-size:clamp(17px,1.5vw,26px)}.jp-word{display:inline;border:0;background:transparent;color:inherit;font:inherit;text-shadow:inherit;padding:0 2px;pointer-events:auto;cursor:pointer;border-radius:5px}.jp-word:hover{background:#174d35c9}rt{font-size:.4em;font-weight:400}';
-  const ja=document.createElement("div");ja.className="ja";if(tokenizer)ja.append(...tokenizer.tokenize(c.text).map(token=>tokenElement(token,true)));else ja.textContent=c.text;
+  const style=document.createElement("style");style.textContent='*{box-sizing:border-box}.ja,.zh{text-align:center;line-height:1.65;color:white;text-shadow:1px 1px 3px #000,-1px -1px 3px #000,0 2px 8px #000;font-family:system-ui,"Meiryo",sans-serif;font-weight:600}.ja{font-size:clamp(20px,2.1vw,34px)}.zh{font-size:clamp(17px,1.5vw,26px)}.ja,.jp-word,.jp-word ruby{user-select:text!important;-webkit-user-select:text!important;pointer-events:auto}.jp-word{display:inline;border:0;background:transparent;color:inherit;font:inherit;text-shadow:inherit;padding:0 2px;pointer-events:auto;cursor:pointer;border-radius:5px}.jp-word:hover{background:#174d35c9}rt{font-size:.4em;font-weight:400;user-select:none;-webkit-user-select:none}';
+  const ja=document.createElement("div");ja.className="ja";ja.dataset.studyText="";ja.dataset.cue=cueKey(c);ja.dataset.index=String(i);selection.bind(ja);if(tokenizer)ja.append(...tokenizer.tokenize(c.text).map(token=>tokenElement(token,true)));else ja.textContent=c.text;
   const translation=document.createElement("div");translation.className="zh";translation.textContent=zh;overlayRoot.append(style,ja,translation);
  }
- async function requestAI(kind,text,index=selected,scope="sentence"){
-  const c=cues[index];if(!enabled||!c)return null;const mine=generation,epoch=aiEpoch,resource=identity||route,context=JSTUDY.context(cues,index);
-  const result=await send({type:"study-ai",kind,scope,text:text||c.text,context:scope==="context"?"":context,resource,requestId:crypto.randomUUID()});
+ async function requestAI(kind,text,index=selected,scope="sentence",channel=kind==="translate"?"translation":"explanation",snapshot=null){
+  const c=snapshot?.cue||cues[index];if(!enabled||!c)return null;const mine=generation,epoch=aiEpoch,resource=snapshot?.resource||identity||route,context=snapshot?.context||JSTUDY.context(cues,index);
+  const result=await send({type:"study-ai",kind,scope,channel,text:text||c.text,context:scope==="context"?"":context,resource,requestId:crypto.randomUUID()});
   if(currentRoute()!==route){reset(currentRoute());return null;}if(!enabled||mine!==generation||epoch!==aiEpoch)return null;if(!result?.ok){if(result?.canceled)return null;throw new Error(result?.error||"文字接口未完成请求");}return result;
  }
  async function ask(kind,text,scope="sentence"){
-  const c=guard();if(aiBusy)return;if(kind!=="translate")video.pause();aiBusy=true;const mine=generation,index=selected;status("正在请求 "+(kind==="translate"?"中文翻译":"中文讲解")+"…");
+  const c=guard();if(aiBusy)return;if(kind!=="translate")video.pause();aiBusy=true;const detail=++detailEpoch;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});const mine=generation,index=selected;status("正在请求 "+(kind==="translate"?"中文翻译":"中文讲解")+"…");
   if(kind==="explain"){ui.setPane("explanation");$("detailTitle").textContent=scope==="context"?"邻近几句讲解":"本句讲解";$("explainScope").textContent=scope==="context"?"当前句及前后各两句，最多五句":"只讲解当前选中句";$("detail").textContent="正在生成讲解…"}
   try{
-   const r=await requestAI(kind,text,index,scope);if(!r)return;
+   const r=await requestAI(kind,text,index,scope);if(!r||detail!==detailEpoch)return;
    if(kind==="translate"){translations.set(cueKey(c),r.text);display(selected);overlaySignature=""}
    else if(selected===index&&(kind!=="word"||lookupId===text)){const target=kind==="word"?$("wordDetail"):$("detail");target.innerHTML=renderMarkdown(r.text);target.classList.add("markdown");if(r.warning){const warning=document.createElement("p");warning.className="error";warning.textContent=r.warning;target.prepend(warning)}if(kind==="explain")foldExplanation(target)}
    status(r.warning|| (r.fromCache?"已使用本地解释缓存。":"已取得接口结果。"),!!r.warning);
-  }catch(e){if(kind==="explain"&&mine===generation)$("detail").textContent=e.message+" 点击讲解按钮可手动重试。";throw e}finally{if(mine===generation)aiBusy=false}
+  }catch(e){if(kind==="explain"&&mine===generation&&detail===detailEpoch)$("detail").textContent=e.message+" 点击讲解按钮可手动重试。";throw e}finally{if(mine===generation&&detail===detailEpoch)aiBusy=false}
  }
  async function autoTranslate(i){
-  if(!enabled||automaticBusy||automaticFailed||!settings.autoTranslate||!settings.configured||i<0)return;
-  const candidates=[i,i+1].filter(x=>cues[x]&&!chineseFor(cues[x])&&!attempted.has(cueKey(cues[x])));
-  if(!candidates.length)return;automaticBusy=true;const mine=generation,epoch=aiEpoch;
+  if(!enabled||automaticBusy||automaticFailed||!bilingual||!settings.configured||i<0)return;
+  const candidates=[i,i+1].filter(x=>cues[x]&&!availableChinese(cues[x])&&!attempted.has(cueKey(cues[x])));
+  if(!candidates.length)return;automaticBusy=true;const mine=generation,epoch=aiEpoch,translation=translationEpoch;
   try{for(const index of candidates){
-   if(!enabled||mine!==generation||epoch!==aiEpoch||currentRoute()!==route)break;
+   if(!enabled||!bilingual||mine!==generation||epoch!==aiEpoch||translation!==translationEpoch||currentRoute()!==route)break;
    const nowIndex=JSTUDY.at(cues,video.currentTime-offset);if(nowIndex<0||index<nowIndex||index>nowIndex+1)break;
    const c=cues[index],key=cueKey(c);attempted.add(key);
-   try{const r=await requestAI("translate",undefined,index);if(r){translations.set(key,r.text);display(selected);overlaySignature=""}}
-   catch(e){if(enabled&&mine===generation&&epoch===aiEpoch){automaticFailed=true;status(e.message,true);}break;}
-  }}finally{if(mine===generation&&epoch===aiEpoch)automaticBusy=false}
+   try{const r=await requestAI("translate",undefined,index);if(r&&bilingual&&translation===translationEpoch){translations.set(key,r.text);display(selected);overlaySignature=""}}
+   catch(e){if(enabled&&bilingual&&translation===translationEpoch&&mine===generation&&epoch===aiEpoch){automaticFailed=true;status(e.message,true);}break;}
+  }}finally{if(mine===generation&&epoch===aiEpoch&&translation===translationEpoch)automaticBusy=false}
  }
  function updateAtTime(force=false){
   if(!enabled||!video)return;
@@ -266,7 +270,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  }
  function download(name,text,type="text/plain"){const url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)}
  $("enable").onclick=()=>{if(enabled)stop();else safe(()=>start())};
- $("show").onclick=()=>{wrap.classList.remove("fold");if(!enabled)safe(()=>start())};
+ $("show").onclick=()=>{if(enabled)stop();else safe(()=>start())};
  $("stopStudy").onclick=()=>stop();
  $("follow").onclick=()=>{followRows=true;renderRows()};$("rows").addEventListener("wheel",()=>followRows=false,{passive:true});
  $("settings").onclick=()=>send({type:"study-open-options"});
@@ -278,20 +282,26 @@ import { renderMarkdown } from "../ui/markdown.js";
  $("pause").onclick=()=>safe(async()=>{guard();video.pause()});
  $("replay").onclick=()=>safe(async()=>{const c=guard();loopOff();await player.play(shifted(c));status("播放到本句结束后暂停。")});
  $("loop").onclick=()=>safe(async()=>{const c=guard();if(player.mode==="loop"){loopOff();return;}await player.play(shifted(c),true);$("loop").classList.add("on");$("loop").textContent="循环：开";$("loop").setAttribute("aria-pressed","true")});
- $("translate").onclick=()=>safe(()=>ask("translate"));
+ $("translate").onclick=()=>safe(async()=>{
+  guard();bilingual=!bilingual;const revision=++translationEpoch,mine=generation;automaticBusy=false;automaticFailed=false;attempted.clear();
+  $("translate").textContent=bilingual?"双语字幕：开":"双语字幕：关";$("translate").setAttribute("aria-pressed",String(bilingual));$("translate").classList.toggle("on",bilingual);
+  if(!bilingual)send({type:"study-stop-ai",channel:"translation"}).catch(()=>{});
+  else{const r=await send({type:"study-settings-public"});if(!enabled||mine!==generation||revision!==translationEpoch)return;settings={...settings,...r?.config};if(!settings.configured&&!cues.every(c=>availableChinese(c)))status("双语已开启；已有中文照常显示，新翻译请先配置文字接口。",true)}
+  overlaySignature="";display(selected,true);updateAtTime();
+ });
  $("explain").onclick=()=>safe(()=>ask("explain"));
  $("paragraph").onclick=()=>safe(()=>ask("explain",JSTUDY.context(cues,selected),"context"));
  $("record").onclick=()=>safe(async()=>{const c=guard();loopOff();video.pause();recorder.open(shifted(c))});
- $("import").onclick=()=>safe(async()=>{if(!enabled)throw new Error("请先开启学习");$("subtitleFile").click()});
+ $("import").onclick=()=>safe(async()=>{if(!enabled)throw new Error("请先开启字幕");$("subtitleFile").click()});
  $("subtitleFile").onchange=()=>safe(async()=>{
   const f=$("subtitleFile").files[0];if(!f)return;if(f.size>5*1024*1024)throw new Error("字幕不能超过5MB");const mine=generation;
   const parsed=JSTUDY.parseSubtitle(await f.text());if(!enabled||mine!==generation)return;
-  asr.stop();abort?.abort();asrMode=false;nativeMode=false;nativeSession=null;nativeSeekEpoch++;loopOff();cues=parsed;chinese=[];identity=identity||route;translations.clear();attempted.clear();
+  asr.stop();abort?.abort();asrMode=false;nativeMode=false;nativeSession=null;nativeSeekEpoch++;aiEpoch++;detailEpoch++;translationEpoch++;selection.reset();wordPanel.reset(true);automaticBusy=false;automaticFailed=false;send({type:"study-stop-ai"}).catch(()=>{});loopOff();cues=parsed;chinese=[];identity=identity||route;translations.clear();attempted.clear();
   await chrome.storage.local.set({["biliscript-study-import:"+route]:{identity,cues,name:f.name,offset}});
   $("source").textContent="手动导入："+f.name;display(0,true);status("已导入真实时间轴日文字幕。");$("subtitleFile").value="";
  });
  $("export").onclick=()=>safe(async()=>{guard();download(route.replace(":","-")+".txt",cues.map(c=>fmt(c.start)+" "+c.text+"\n"+chineseFor(c)).join("\n\n"))});
- $("exportWords").onclick=()=>download("生词.json",JSON.stringify(vocabulary,null,2),"application/json");
+
  chrome.runtime.onMessage.addListener((m,s,reply)=>{
   if(m?.type==="study-toggle"){if(enabled){wrap.classList.remove("fold")}else safe(()=>start());reply({ok:true});return false;}
   if(m?.action!=="studyPlayReference")return;
@@ -300,12 +310,12 @@ import { renderMarkdown } from "../ui/markdown.js";
  });
  document.addEventListener("fullscreenchange",()=>{overlaySignature="";ui.mount(video);updateOverlay(video?JSTUDY.at(cues,video.currentTime-offset):-1)});
  addEventListener("pagehide",()=>stop("页面已离开，学习已停止。"));
- chrome.storage.local.get(["biliscriptStudyDictionary","biliscriptStudyVocabulary"]).then(x=>{words=x.biliscriptStudyDictionary||{};vocabulary=x.biliscriptStudyVocabulary||[];renderVocabulary()});
+ chrome.storage.local.get("biliscriptStudyDictionary").then(x=>{words=x.biliscriptStudyDictionary||{}});
  chrome.storage.onChanged?.addListener((changes,area)=>{if(area==="local"&&changes.biliscriptStudyDictionary)words=changes.biliscriptStudyDictionary.newValue||{}});
  fetch(chrome.runtime.getURL("study/basic-dictionary.json")).then(r=>r.json()).then(x=>basic=x).catch(()=>{});
- send({type:"study-settings-public"}).then(r=>{settings={...settings,...r?.config};if(settings.autoStart&&route&&!enabled)safe(()=>start())}).catch(()=>{});
+ send({type:"study-settings-public"}).then(r=>{settings={...settings,...r?.config};}).catch(()=>{});
  function sync(){
-  const next=currentRoute();if(next!==route)reset(next);bindVideo();ui.mount(video);if(!next){host.hidden=true;controls.hidden=true}
+  const next=currentRoute();if(next!==route)reset(next);bindVideo();ui.mount(video);if(!next){host.hidden=true;controls.hidden=true;ui.entry.hidden=true}
   if(enabled&&nativeMode&&nativeSession&&!nativeLive(nativeSession)){asr.stop();nativeSession=null;nativeSeekEpoch++;scopeWaiting=true;waiting=false;resumeAfter=false;clearOverlay();status("播放器已更新，正在重验当前音轨。")}
   if(enabled&&nativeMode&&(scopeWaiting||nativeSession&&nativeSession.playableDuration<nativeSession.duration))void refreshNativeScope();
   if(enabled){player?.tick();if(asrMode&&!scopeWaiting){asr.updateTime(video?.currentTime||0);if(!waiting&&!asrError)waitForCurrent()}updateAtTime();}

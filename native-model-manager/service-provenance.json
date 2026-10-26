@@ -1,0 +1,12 @@
+{
+  "baseServerSha256": "dbf0751c55c9e2c0daae7d4189358aa0c364f702761e4368b380b74187bfefbe",
+  "baseWindowAudioSha256": "6265dfbd52059cd6516ba864bc17a3ca2e4fc2b5312c175beef7cd9beb19a2a4",
+  "legacyServiceUntouched": true,
+  "adapterChanges": [
+    "explicit model directories and default",
+    "managed instance status",
+    "15-minute other-consumer protection",
+    "short-lived file stop intent rejects new ASR jobs before owned shutdown",
+    "allow the study consumer header in extension CORS preflights"
+  ]
+}

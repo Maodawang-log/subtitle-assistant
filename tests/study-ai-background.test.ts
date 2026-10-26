@@ -71,7 +71,7 @@ describe("study AI background integration", () => {
     expect(defaults).toMatchObject({ ok: true, config: { autoStart: false, configured: false } });
     disk.set(SETTINGS, { ...configured, autoStart: true });
     const publicSettings = await dispatch({ type: "study-settings-public" }).response;
-    expect(publicSettings.config).toMatchObject({ autoStart: true, configured: true, model: configured.model });
+    expect(publicSettings.config).toMatchObject({ autoStart: false, autoTranslate: false, configured: true, model: configured.model });
     expect(publicSettings.config).not.toHaveProperty("apiKey");
     expect(JSON.stringify(publicSettings)).not.toContain(configured.apiKey);
     expect(fetchMock).not.toHaveBeenCalled();

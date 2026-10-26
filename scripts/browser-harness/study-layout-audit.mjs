@@ -7,7 +7,7 @@ const out=artifactDir("study-layout-"+label),temp=path.join(REPO_ROOT,".scratch"
 await mkdir(temp,{recursive:true});process.env.TEMP=temp;process.env.TMP=temp;
 const bv="BV1wYAmeqEuV",route=bv+":p1",checks=[],evidence={label,distDir,scope:"real public page; local subtitle fixture; no cloud AI; isolated profile",checks};
 let browser,page,worker;const cdps=[];
-const expression=id=>`(document.getElementById('biliscript-study-controls')?.shadowRoot?.getElementById(${JSON.stringify(id)})||document.getElementById('biliscript-japanese-study')?.shadowRoot?.getElementById(${JSON.stringify(id)}))`;
+const expression=id=>`(document.getElementById('biliscript-study-entry')?.shadowRoot?.getElementById(${JSON.stringify(id)})||document.getElementById('biliscript-study-controls')?.shadowRoot?.getElementById(${JSON.stringify(id)})||document.getElementById('biliscript-japanese-study')?.shadowRoot?.getElementById(${JSON.stringify(id)}))`;
 async function click(id){
  const point=await page.cdp.evaluate(`(()=>{const e=${expression(id)};e.scrollIntoView({block:'center',behavior:'instant'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {x,y,w:r.width,h:r.height,hit:e.getRootNode().elementFromPoint(x,y)===e}})()`);
  if(!point.hit||point.w<1||point.h<1)throw new Error("Button is not reachable: "+id+" "+JSON.stringify(point));
@@ -46,7 +46,7 @@ try{
  await page.cdp.evaluate("document.getElementById('biliscript-study-controls').scrollIntoView({block:'center',behavior:'instant'})");
  evidence.closed=await measure();await screenshot(page.cdp,path.join(out,"01-closed.png"));
  if(label!=='before'){
-  check('closed-slot-outside-player',evidence.closed.slotOutsideFixedWrapper);await nativeActions('closed');
+  check('closed-entry-inside-native-controls',await page.cdp.evaluate("!!document.querySelector('.bpx-player-control-bottom-right #biliscript-study-entry')&&document.getElementById('biliscript-study-slot').getBoundingClientRect().height===0"));await nativeActions('closed');
   await full(true);check('fullscreen-closed-hides-learning-ui',await page.cdp.evaluate("document.getElementById('biliscript-study-controls').hidden&&document.getElementById('biliscript-japanese-study').hidden"));await full(false);
  }
  await click("show");await waitFor("learning controls",()=>page.cdp.evaluate("document.getElementById('biliscript-study-controls').hasAttribute('data-enabled')"));await sleep(1000);

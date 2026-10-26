@@ -4,15 +4,22 @@
 <main><small>语言学习助手</small><h1>学习设置</h1>
 <section><h2>字幕与文字接口</h2>
 <p class="note">当前视频自动取轨、形态分词和本地识别仍支持日语。词典语言选择只影响查词，不代表所有视频功能已支持英语或韩语。</p>
-<p><label><input id="autoStart" type="checkbox"> 打开新视频时自动开启学习（默认关闭）</label></p>
-<p><label><input id="autoTranslate" type="checkbox"> 学习开启后，自动翻译当前与下一句（接口可能计费）</label></p>
+<p class="note">每个视频默认关闭字幕。点击播放器内“开启字幕”后只显示日文；再开启“双语字幕”才持续翻译当前及下一句。</p>
 <p class="note">本地识别、离线词典和跟读不需要文字接口 Key。</p>
-<label>本地识别模型 · 日语<select id="asrModel"><option value="small">Whisper small · 较快</option><option value="medium">Whisper medium</option></select></label>
+<label>本地识别模型 · 日语<select id="asrModel"><option value="small">Whisper small · 较快</option><option value="medium">Whisper medium</option><option value="large-v3-turbo" disabled>Whisper large-v3-turbo · 需安装</option></select></label>
 <div class="grid"><label>OpenAI 兼容 Base URL<input id="baseUrl" type="url" placeholder="https://api.deepseek.com"></label><label>模型名<input id="model" placeholder="deepseek-v4-flash"></label></div>
 <label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空保持已保存的 Key"></label>
 <p class="note">Key 仅存本浏览器。诊断不会包含 Key、服务地址、字幕原文或完整接口响应。</p>
 <label>接口兼容方式<select id="compatibility"><option value="auto">自动 · DeepSeek 直连使用非思考模式</option><option value="standard">标准 OpenAI 兼容 · 不发送厂商专用字段</option><option value="deepseek">DeepSeek 协议 · 非思考模式（适用于兼容代理）</option></select></label>
 <div class="row"><button id="save" class="primary">保存设置</button><button id="health">检查本地识别服务</button><button id="diagnostics">导出讲解诊断</button></div><p id="status" role="status"></p>
+</section>
+<section><h2>本地模型与服务</h2>
+<p id="modelService" role="status">正在检查连接…</p><p id="serviceSharing" class="note"></p>
+<div class="row"><button id="managerRefresh">刷新状态</button><button id="managerStart">启动服务</button><button id="managerStop" disabled>停止服务</button><button id="managerRestart" hidden>应用模型并重启</button><button id="managerHandover" hidden>首次接管现有服务</button></div>
+<div id="connectionHelp"><p class="note">首次使用请运行配套包的 Install-Connection.cmd，将此扩展 ID 粘贴进去。连接仅对当前 Windows 用户生效，之后可在本页操作。</p><p><code id="extensionId"></code> <button id="copyExtensionId">复制 ID</button></p></div>
+<p class="note">新模型保存位置：<span id="modelDirectory">连接后显示</span></p><button id="managerDirectory">选择以后下载的位置</button>
+<div id="models" class="catalog"></div><progress id="modelProgress" max="100" hidden></progress><button id="managerCancel" hidden>取消下载</button><p id="downloadState" role="status"></p><p id="managerNote" role="status"></p>
+<p class="note">已有 small/medium 直接复用，不自动搬移。新模型只在点击下载后获取，完整性校验通过才启用。打开设置和启动服务不会提交视频转写或付费请求。</p>
 </section>
 <section><h2>离线词典</h2><p class="note">按词条语言选择默认词典。多个词典可同时安装；下载、更新和删除只作用于选中的词典。整句翻译仍使用上方文字接口。</p>
 <div class="grid"><label>查词语言<select id="dictLanguage"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语 · 暂未提供词典</option></select></label><label><span id="defaultLabel">日语默认词典</span><select id="dictDefault" disabled><option value="">尚未安装</option></select></label></div>

@@ -43,7 +43,7 @@ let ai: (message: any) => Promise<unknown>;
 let nativeSource: () => Promise<unknown>;
 let mediaSrc: string;
 
-function element<T extends HTMLElement = HTMLElement>(id: string): T { return (shadow.getElementById(id)||document.getElementById("biliscript-study-controls")?.shadowRoot?.getElementById(id)) as T; }
+function element<T extends HTMLElement = HTMLElement>(id: string): T { return (shadow.getElementById(id)||document.getElementById("biliscript-study-controls")?.shadowRoot?.getElementById(id)||document.getElementById("biliscript-study-entry")?.shadowRoot?.getElementById(id)) as T; }
 async function click(id: string) { element(id).click(); await flush(); }
 async function sync() { await vi.advanceTimersByTimeAsync(250); await flush(); }
 function aiCalls() { return send.mock.calls.map(([message]) => message).filter((message) => message.type === "study-ai"); }
@@ -157,7 +157,7 @@ afterEach(() => {
 describe("opt-in learning UI integration", () => {
   it("starts disabled and performs no subtitle, audio or AI requests", async () => {
     await sync();
-    expect(element("enable").textContent).toBe("开启学习");
+    expect(element("enable").textContent).toBe("开启字幕");
     expect(sources.cc).not.toHaveBeenCalled();
     expect(sources.asr.start).not.toHaveBeenCalled();
     expect(aiCalls()).toEqual([]);
@@ -171,6 +171,8 @@ describe("opt-in learning UI integration", () => {
     await sync();
     const overlay = document.querySelector(".bpx-player-container > #biliscript-study-overlay")!;
     expect(overlay.shadowRoot!.querySelector(".ja")!.textContent).toContain("最初の文です。");
+    expect(overlay.shadowRoot!.querySelector(".zh")!.textContent).toBe("");
+    await click("translate");
     expect(overlay.shadowRoot!.querySelector(".zh")!.textContent).toBe("这是第一句。");
     expect(sources.asr.start).not.toHaveBeenCalled();
     await click("enable");
@@ -186,7 +188,7 @@ describe("opt-in learning UI integration", () => {
     history.replaceState({}, "", normalUrl + "?p=2");
     await sync();
     expect(signal.aborted).toBe(true);
-    expect(element("enable").textContent).toBe("开启学习");
+    expect(element("enable").textContent).toBe("开启字幕");
     pending.resolve(readyCc());
     await flush();
     expect(element("current").textContent).toContain("开启后");
@@ -236,7 +238,7 @@ describe("opt-in learning UI integration", () => {
     await sync();
     emitAsr([{ from: 31, to: 32, content: "obsolete" }], 30);
     expect(element("current").textContent).not.toContain("obsolete");
-    expect(element("enable").textContent).toBe("开启学习");
+    expect(element("enable").textContent).toBe("开启字幕");
   });
 
   it("seeks ASR to the new playback window, resumes only after that window is ready and stops on close", async () => {
@@ -304,8 +306,10 @@ describe("opt-in learning UI integration", () => {
     ai = () => pending.promise;
     sources.cc.mockResolvedValue({ ...readyCc(), chineseCues: [] });
     await click("enable");
+    if (element("enable").textContent === "关闭字幕") await click("translate");
     expect(aiCalls().map((message) => message.text)).toEqual([japanese[0].content]);
     await click("enable");
+    if (element("enable").textContent === "关闭字幕") await click("translate");
     pending.resolve({ ok: true, text: "迟到的译文" });
     await flush();
     await sync();
@@ -319,6 +323,7 @@ describe("opt-in learning UI integration", () => {
     settings.configured = true;
     sources.cc.mockResolvedValue({ ...readyCc(), chineseCues: [] });
     await click("enable");
+    if (element("enable").textContent === "关闭字幕") await click("translate");
     await sync();
     await sync();
     expect(aiCalls().map((message) => message.text)).toEqual([japanese[0].content, japanese[1].content]);
@@ -331,6 +336,7 @@ describe("opt-in learning UI integration", () => {
     const first = deferred<unknown>();
     ai = (message) => message.text === japanese[0].content ? first.promise : Promise.resolve({ ok: true, text: "译文" });
     await click("enable");
+    if (element("enable").textContent === "关闭字幕") await click("translate");
     video.currentTime = 30.5;
     await flush();
     first.resolve({ ok: true, text: "旧请求结果" });
@@ -348,6 +354,7 @@ describe("opt-in learning UI integration", () => {
     const first = deferred<unknown>();
     ai = (message) => message.text === japanese[0].content ? first.promise : Promise.resolve({ ok: true, text: "译文" });
     await click("enable");
+    if (element("enable").textContent === "关闭字幕") await click("translate");
     time = 30.5;
     await sync();
     first.resolve({ ok: true, text: "旧请求结果" });
@@ -491,7 +498,7 @@ describe("validated native-audio UI integration", () => {
     await flush();
     expect(sources.asr.start).not.toHaveBeenCalled();
     expect(sources.cc).not.toHaveBeenCalled();
-    expect(element("enable").textContent).toBe("开启学习");
+    expect(element("enable").textContent).toBe("开启字幕");
   });
 
   it.each(["close", "page"])("ignores a late seek association after %s", async (change) => {
@@ -510,7 +517,7 @@ describe("validated native-audio UI integration", () => {
     await flush();
     expect(sources.asr.start).toHaveBeenCalledTimes(1);
     expect(sources.cc).not.toHaveBeenCalled();
-    expect(element("enable").textContent).toBe("开启学习");
+    expect(element("enable").textContent).toBe("开启字幕");
   });
 
   it.each(["tag", "mediaSrc"])("cancels a replaced %s binding and resumes only after revalidation", async (bindingPart) => {
@@ -528,7 +535,7 @@ describe("validated native-audio UI integration", () => {
     expect(element("current").textContent).not.toContain("old native result");
     fresh.resolve(readyNative());await flush();
     expect(sources.asr.start).toHaveBeenCalledTimes(2);
-    expect(element("enable").textContent).toBe("停止学习");
+    expect(element("enable").textContent).toBe("关闭字幕");
   });
   it("automatically resumes later windows when a verified preview limit is lifted", async()=>{
     nativeSource=async()=>readyNative();paused=false;await click("enable");emitAsr(japanese.slice(0,2),0,30);await flush();

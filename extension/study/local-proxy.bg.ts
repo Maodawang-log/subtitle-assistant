@@ -131,7 +131,7 @@ export function createStudyProxy(deps: ProxyDependencies) {
   async function cancelRemote(remoteId: string) {
     try {
       await fetchImpl(`${STUDY_LOCAL_ORIGIN}/v1/audio/cancel`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", "X-BiliScript-Consumer": "study-extension" },
         body: JSON.stringify({ request_id: remoteId }), credentials: "omit", cache: "no-store",
         signal: AbortSignal.timeout(5000)
       });
@@ -184,7 +184,7 @@ export function createStudyProxy(deps: ProxyDependencies) {
         const body = windowPayload(message.payload, key);
         if (!body) { reply(errorReply("PAYLOAD", "音频窗口参数无效")); return false; }
         url = `${STUDY_LOCAL_ORIGIN}/v1/audio/window`;
-        init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+        init = { method: "POST", headers: { "Content-Type": "application/json", "X-BiliScript-Consumer": "study-extension" }, body: JSON.stringify(body) };
       } else { reply(errorReply("ACTION", "不支持的本地服务操作")); return false; }
       init.credentials = "omit";
     } else {

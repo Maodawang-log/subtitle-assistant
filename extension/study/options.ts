@@ -1,20 +1,21 @@
 // @ts-nocheck
+import { setupModelManager } from "./model-manager-ui.js";
 import { ZH_DICTIONARY,DICTIONARIES,DICTIONARY_ORIGINS,checkDictionaryUpdate } from "./dictionary-catalog.js";
 import { dictionaryInventory,setDefaultDictionary,lookupDictionary } from "./dictionary-db.js";
 const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let previous={},release=ZH_DICTIONARY,installed,busy=true,operation="recover",inventory={installed:[],defaults:{}},lookupEpoch=0;
 const languageNames={ja:"日语",en:"英语",ko:"韩语",zh:"中文"},releases=new Map(DICTIONARIES.map(item=>[item.id,item]));
 const note=(id,text,error=false)=>{$(id).textContent=text;$(id).classList.toggle("error",error)};
 const download=(name,value,type="application/json")=>{const url=URL.createObjectURL(new Blob([value],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
-chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("autoStart").checked=!!previous.autoStart;$("asrModel").value=previous.asrModel||"small";$("autoTranslate").checked=previous.autoTranslate!==false;$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
+chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("asrModel").value=previous.asrModel||"small";$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
 $("save").onclick=async()=>{
  try{
   const u=new URL($("baseUrl").value.trim());if(u.username||u.password||u.search||u.hash||u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("请输入不含凭据或查询参数的HTTPS或本机HTTP地址");
   const granted=await chrome.permissions.request({origins:[u.origin+"/*"]});if(!granted)throw new Error("未允许访问该接口域名，未保存");
-  const data={...previous,asrModel:$("asrModel").value,autoStart:$("autoStart").checked,autoTranslate:$("autoTranslate").checked,baseUrl:u.href.replace(/\/+$/,""),model:$("model").value.trim(),compatibility:$("compatibility").value,apiKey:$("apiKey").value.trim()||previous.apiKey||""};
-  if(!data.model)throw new Error("请填写模型名");await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status","已保存。关闭学习再开启会应用新设置。");
+  const data={...previous,asrModel:$("asrModel").value,autoStart:false,autoTranslate:false,baseUrl:u.href.replace(/\/+$/,""),model:$("model").value.trim(),compatibility:$("compatibility").value,apiKey:$("apiKey").value.trim()||previous.apiKey||""};
+  if(!data.model)throw new Error("请填写模型名");await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status","已保存。关闭字幕再开启会应用新设置。");
  }catch(e){note("status",e.message,true)}
 };
-$("health").onclick=async()=>{try{const r=await chrome.runtime.sendMessage({type:"study-local-asr",action:"health",requestId:crypto.randomUUID()});if(!r?.ok)throw new Error(r?.error?.message||"本地服务未启动");note("status","本地识别服务可用。")}catch(e){note("status",e.message+" 请运行E盘 local-asr 的启动脚本。",true)}};
+$("health").onclick=async()=>{try{const r=await chrome.runtime.sendMessage({type:"study-local-asr",action:"health",requestId:crypto.randomUUID()});if(!r?.ok)throw new Error(r?.error?.message||"本地服务未启动");note("status","本地识别服务可用。")}catch(e){note("status",e.message+" 请在下方‘本地模型与服务’连接并启动服务。",true)}};
 $("diagnostics").onclick=async()=>{const data=(await chrome.storage.local.get("biliscriptJapaneseAiDiagnostics")).biliscriptJapaneseAiDiagnostics||[];download("讲解安全诊断.json",JSON.stringify({version:1,entries:data},null,2));note("status","已导出最近20次请求的类型、结束原因和计数；不含 Key、地址、字幕或原始响应。")};
 const worker=new Worker(chrome.runtime.getURL("study/dictionary-worker.js"));
 function buttons(){
@@ -76,3 +77,5 @@ $("lookup").onclick=async()=>{
  const text=$("lookupText").value.trim(),language=$("dictLanguage").value,mine=++lookupEpoch;if(!text||text.length>100)return;
  try{const entries=await lookupDictionary([text],language);if(mine!==lookupEpoch)return;$("lookupResult").replaceChildren();if(!entries.length){$("lookupResult").textContent="当前语言的默认词典未命中；请先安装词典，或改用词典原形。";return}for(const item of entries){const p=document.createElement("p");p.textContent=item.term+" · "+item.reading+"\n"+item.meaning+"\n来源："+item.source;$("lookupResult").append(p)}}catch{if(mine===lookupEpoch)note("lookupResult","词典查询失败，请重新打开设置检查安装状态。",true)}
 };
+
+setupModelManager();

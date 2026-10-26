@@ -1,9 +1,13 @@
 ﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [string]$ExistingDirectory = "",
-    [string]$PackageDirectory = "E:\Work\日语视频学习插件\outputs\biliscript-japanese-study-2.6.3.6"
+    [string]$PackageDirectory = "E:\Work\日语视频学习插件\outputs\biliscript-japanese-study-2.6.4.0"
 )
 $ErrorActionPreference = "Stop"
+function Get-PackageHash([string]$path) {
+    $stream=[IO.File]::OpenRead($path);$algorithm=[Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose();$algorithm.Dispose() }
+}
 $taskRoot = "E:\Work\日语视频学习插件"
 if ([string]::IsNullOrWhiteSpace($ExistingDirectory)) {
     Write-Host "请在 Edge/Chrome 扩展管理页查看当前语言学习扩展（旧名 BiliScript 日语学习）的加载目录。"
@@ -22,24 +26,24 @@ foreach ($folder in @($target,$source)) {
 }
 $old = Get-Content -LiteralPath (Join-Path $target "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $new = Get-Content -LiteralPath (Join-Path $source "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($old.name -notin @("BiliScript 日语学习","语言学习助手") -or $new.name -ne "语言学习助手" -or $new.version -ne "2.6.3.6") { throw "扩展身份或新包版本不匹配。" }
-if ($old.version -eq $new.version) { Write-Host "此目录已经是 2.6.3.6。"; return }
-if ($old.version -notin @("2.6.3.1","2.6.3.2","2.6.3.3","2.6.3.4","2.6.3.5")) { throw "此脚本支持从2.6.3.1至2.6.3.5升级。" }
+if ($old.name -notin @("BiliScript 日语学习","语言学习助手") -or $new.name -ne "语言学习助手" -or $new.version -ne "2.6.4.0") { throw "扩展身份或新包版本不匹配。" }
+if ($old.version -eq $new.version) { Write-Host "此目录已经是 2.6.4.0。"; return }
+if ($old.version -notin @("2.6.3.1","2.6.3.2","2.6.3.3","2.6.3.4","2.6.3.5","2.6.3.6")) { throw "此脚本支持从2.6.3.1至2.6.3.6升级。" }
 $stamp = (Get-Date -Format "yyyyMMdd-HHmmss") + "-" + [Guid]::NewGuid().ToString("N").Substring(0,8)
 $backup = Join-Path $taskRoot ("snapshots\in-place-upgrade-" + $stamp)
 Write-Host "原加载目录：$target"
 Write-Host "新版本来源：$source"
 Write-Host "完整备份至：$backup"
-if (!$PSCmdlet.ShouldProcess($target,"完整备份后原地升级为2.6.3.6")) { return }
+if (!$PSCmdlet.ShouldProcess($target,"完整备份后原地升级为2.6.4.0")) { return }
 New-Item -ItemType Directory -Path $backup | Out-Null
 $before = @()
 foreach ($file in Get-ChildItem -LiteralPath $target -File -Recurse -Force) {
     $relative = $file.FullName.Substring($target.Length + 1)
-    $before += [PSCustomObject]@{ Path=$relative; SHA256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash }
+    $before += [PSCustomObject]@{ Path=$relative; SHA256=(Get-PackageHash $file.FullName) }
 }
 foreach ($item in Get-ChildItem -LiteralPath $target -Force) { Copy-Item -LiteralPath $item.FullName -Destination $backup -Recurse -Force }
 foreach ($entry in $before) {
-    if ((Get-FileHash -LiteralPath (Join-Path $backup $entry.Path) -Algorithm SHA256).Hash -ne $entry.SHA256) { throw "备份校验失败，原目录尚未更新。" }
+    if ((Get-PackageHash (Join-Path $backup $entry.Path)) -ne $entry.SHA256) { throw "备份校验失败，原目录尚未更新。" }
 }
 $record = [PSCustomObject]@{ Original=$target; Package=$source; Backup=$backup; OldVersion=$old.version; NewVersion=$new.version; Files=$before }
 $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Split-Path $backup -Parent) ("upgrade-record-"+$stamp+".json")) -Encoding UTF8
@@ -47,7 +51,7 @@ $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path (Split-P
 foreach ($item in Get-ChildItem -LiteralPath $source -Force) { Copy-Item -LiteralPath $item.FullName -Destination $target -Recurse -Force }
 foreach ($file in Get-ChildItem -LiteralPath $source -File -Recurse -Force) {
     $relative = $file.FullName.Substring($source.Length + 1)
-    if ((Get-FileHash -LiteralPath (Join-Path $target $relative) -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash) { throw "新文件校验失败。完整旧版备份：$backup" }
+    if ((Get-PackageHash (Join-Path $target $relative)) -ne (Get-PackageHash $file.FullName)) { throw "新文件校验失败。完整旧版备份：$backup" }
 }
 Write-Host ""
 Write-Host "文件升级完成。请在扩展管理页点击原扩展的“重新加载”，然后刷新B站视频页。"
