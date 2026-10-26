@@ -5,6 +5,7 @@ import { createBoundedAsrController, requestStudyAudioWindow } from "./bounded-a
 import { getNativeStudySource, sameNativeBinding } from "./native-source.js";
 import { createStudyShell } from "./ui-shell.js";
 import { createInlineRecorder } from "./inline-recorder.js";
+import { renderDictionaryResults } from "./dictionary-view.js";
 import { renderMarkdown } from "../ui/markdown.js";
 (()=>{
  if(document.getElementById("biliscript-japanese-study"))return;
@@ -196,9 +197,7 @@ import { renderMarkdown } from "../ui/markdown.js";
    const r=await send({type:"study-dictionary-lookup",language:"ja",queries:[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)].filter(Boolean)});
    if(!enabled||mine!==lookupEpoch)return;
    if(r?.ok&&r.entries?.length){
-    meaning.replaceChildren();
-    for(const item of r.entries){const p=document.createElement("p"),label=document.createElement("strong");label.textContent=item.term+" · "+item.reading;const body=document.createElement("div");body.textContent=item.meaning;p.append(label,body);meaning.append(p)}
-    const source=document.createElement("small");source.textContent=r.entries[0].source;meaning.append(source);
+    renderDictionaryResults(meaning,r.entries);
    }else if(!entry)meaning.textContent=r?.ok?"当前日语默认词典未命中，或尚未安装。可在设置中选择词典。":r?.error||"本地词典暂时不可用。";
   }catch{if(mine===lookupEpoch&&!entry)meaning.textContent="本地词典暂时不可用，请在设置中检查。"}
  }

@@ -2,6 +2,17 @@ import {it,expect,vi,afterEach} from "vitest";
 import {createStudyShell} from "../extension/study/ui-shell.js";
 let shell:ReturnType<typeof createStudyShell>|undefined;
 afterEach(()=>{shell?.destroy();document.body.replaceChildren();delete (document as any).fullscreenElement;vi.unstubAllGlobals();vi.restoreAllMocks()});
+it("does not insert study hosts or alter sidebar styles before server DOM hydration finishes",()=>{
+ vi.stubGlobal("chrome",{runtime:{getURL:(p:string)=>p}});
+ document.body.innerHTML='<div id="app" data-server-rendered="true"><main class="left-container"><div id="playerWrap"><video></video></div><div id="native-actions">native actions</div></main><aside class="right-container"><div>native recommendations</div></aside></div>';
+ const app=document.getElementById("app")!,before=app.outerHTML,video=app.querySelector("video")!;
+ shell=createStudyShell();for(let i=0;i<8;i++)shell.mount(video);
+ expect(app.outerHTML).toBe(before);expect(app.contains(shell.host)).toBe(false);expect(app.contains(shell.slot)).toBe(false);
+ // Enabling early must not mutate the site's not-yet-hydrated DOM either.
+ shell.setEnabled(true);shell.mount(video);expect(app.outerHTML).toBe(before);
+ shell.setEnabled(false);app.removeAttribute("data-server-rendered");shell.mount(video);
+ expect(shell.slot.previousElementSibling?.id).toBe("playerWrap");expect(document.querySelectorAll("#biliscript-study-slot")).toHaveLength(1);
+});
 it("reserves a sibling slot outside the fixed player wrapper through repeated mounts",()=>{
  vi.stubGlobal("chrome",{runtime:{getURL:(p:string)=>p}});
  document.body.innerHTML='<main class="left-container"><div id="playerWrap" style="height:400px"><div id="bilibili-player"><video></video></div></div><div id="native-actions">native actions</div></main>';

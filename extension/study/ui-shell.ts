@@ -36,6 +36,11 @@ export function createStudyShell(){
   idleTimer=window.setTimeout(()=>{if(!pinned&&!controls.matches(":hover")&&!roots[1].activeElement?.matches(":focus-visible"))controls.classList.add("idle");else reveal()},3200);
  }
  function mount(video:HTMLVideoElement|null){
+  // Vue 2 production hydration walks the server DOM by position. Inserting
+  // even a hidden sibling before that finishes can abort the site's mount.
+  // Keep our hosts outside its root until Vue consumes the SSR marker; the
+  // existing sync loop retries, without guessing a network/loading timeout.
+  if(!video?.isConnected||document.querySelector("#app[data-server-rendered]"))return;
   const full=document.fullscreenElement,nowFull=!!full;
   if(nowFull!==fullscreen){fullscreen=nowFull;if(fullscreen)wrap.classList.add("fold");else if(enabled)wrap.classList.remove("fold");reveal()}
   host.toggleAttribute("data-fullscreen",fullscreen);controls.toggleAttribute("data-fullscreen",fullscreen);
