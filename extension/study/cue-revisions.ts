@@ -43,7 +43,11 @@ export function createCueTimeline(){
    if(scope!==source){windows.clear();scope=source}
    const start=meta.windowStart,end=start+meta.duration;
    const clean=repairAsrSegments(items.map(c=>({from:Math.max(start,c.start),to:Math.min(end,c.end),content:c.text})).filter(c=>c.to>c.from&&c.content));
-   windows.set(start,{start,end,order:++sequence,cues:clean.map(c=>make({start:c.from,end:c.to,text:c.content},scope+':'+start))});
+   const previous=windows.get(start),matches=(old:RevisionCue,c:{from:number;to:number;content:string})=>old.start===c.from&&old.end===c.to&&old.originalText===c.content;
+   // Seeking can re-deliver the untouched acoustic cache. It is not a new
+   // revision and must neither undo explicit edits nor reorder overlaps.
+   if(previous?.end===end&&previous.cues.length===clean.length&&clean.every((c,i)=>matches(previous.cues[i],c)))return current;
+   windows.set(start,{start,end,order:++sequence,cues:clean.map(c=>previous?.cues.find(old=>matches(old,c))||make({start:c.from,end:c.to,text:c.content},scope+':'+start))});
    return rebuild();
   },
   edit(id:string,revision:number,text:string){
