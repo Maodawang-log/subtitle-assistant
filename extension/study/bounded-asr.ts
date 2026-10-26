@@ -6,6 +6,7 @@ import { getSourceAudioUrl } from "../asr/audio-source.js";
 import type { AudioSource } from "../asr/audio-source.js";
 import { fetchStudyBiliJson } from "./cc-source.js";
 import { createChromeStudyAudioCache, type StudyAudioCacheStore } from "./study-audio-cache.js";
+import { repairAsrSegments } from "./cue-revisions.js";
 import { sendStudyMessage, type StudyAudioWindowPayload, type StudyAsrWindowMessage, type StudyAsrCancelMessage } from "./messaging.js";
 
 export const STUDY_ASR_CHUNK_SECONDS = 30;
@@ -193,7 +194,7 @@ export function normalizeStudyAudioCues(raw: unknown, slot: { start: number; dur
     const clippedTo = Math.min(end, to);
     if (clippedTo > clippedFrom) cues.push({ from: clippedFrom, to: clippedTo, content });
   }
-  return cues.sort((a, b) => a.from - b.from || a.to - b.to);
+  return repairAsrSegments(cues);
 }
 
 function readableError(error: unknown): string {

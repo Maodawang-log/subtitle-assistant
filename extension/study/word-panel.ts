@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { renderDictionaryResults } from "./dictionary-view.js";
 export function createWordPanel(ui, options) {
- const {$}=ui, key="biliscriptStudyVocabulary";let vocabulary=[],epoch=0,write=Promise.resolve();
+ const {$}=ui, key="biliscriptStudyVocabulary";let vocabulary=[],epoch=0,write=Promise.resolve(),expanded=true;
  const stars=new Set();
  const persist=()=>{const snapshot=vocabulary.slice();write=write.catch(()=>{}).then(()=>chrome.storage.local.set({[key]:snapshot}));return write};
  function updateStars(){for(const item of stars){if(!item.button.isConnected){stars.delete(item);continue}const saved=vocabulary.some(x=>x.term===item.term);item.button.textContent=saved?"★":"☆";item.button.setAttribute("aria-pressed",String(saved));item.button.setAttribute("aria-label",(saved?"取消收藏 ":"收藏 ")+item.term);item.button.title=saved?"取消收藏":"收藏到生词本"}}
@@ -23,8 +23,11 @@ export function createWordPanel(ui, options) {
    target.append(card);
   }
  }
- async function show(tokens,source){
-  const mine=++epoch,binding=options.binding();$("wordDetail").replaceChildren();stars.clear();
+ async function show(tokens,source:any=undefined){
+  const mine=++epoch,binding=options.binding();$("wordDetail").replaceChildren();stars.clear();expanded=true;
+  const tools=document.createElement("div");tools.className="word-collapse-tools";
+  const setExpanded=(value)=>{expanded=value;for(const card of $("wordDetail").querySelectorAll(".word-card")){card.querySelector(".word-toggle").setAttribute("aria-expanded",String(value));card.querySelector(".word-body").hidden=!value}};
+  for(const [label,value,cls] of [["全部展开",true,"word-expand-all"],["全部折叠",false,"word-collapse-all"]]){const button=document.createElement("button");button.className=cls;button.textContent=label;button.onclick=()=>setExpanded(value);tools.append(button)}$("wordDetail").append(tools);
   const unique=new Map();for(const token of tokens){if(token.pos==="記号"||!/[\p{L}\p{N}]/u.test(token.surface_form))continue;const term=token.basic_form&&token.basic_form!=="*"?token.basic_form:token.surface_form;if(!unique.has(term))unique.set(term,token)}
   for(const [lemma,token] of unique){
    if(mine!==epoch||binding!==options.binding())return;
@@ -32,8 +35,10 @@ export function createWordPanel(ui, options) {
    card.className="word-card";head.className="word-heading";title.textContent=token.surface_form;star.className="word-star";star.disabled=true;stars.add({term:lemma,button:star});
    info.className="word-reading";info.textContent=[JSTUDY.hiragana(token.reading||entry?.reading||""),"原形："+lemma,token.pos,JSTUDY.conjugation(token)].filter(Boolean).join(" · ");
    meaning.className="word-meaning";meaning.textContent=entry?(typeof entry==="string"?entry:entry.meaning):"正在查本地词典…";
-   head.append(title,star);card.append(head,info,meaning);
-   if(options.explain){const explain=document.createElement("button");explain.className="word-explain";explain.textContent="AI 词义与变形";explain.onclick=()=>options.explain(token,source);card.append(explain)}
+   const toggle=document.createElement("button"),body=document.createElement("div");toggle.className="word-toggle";toggle.setAttribute("aria-expanded",String(expanded));toggle.append(title);body.className="word-body";body.hidden=!expanded;
+   toggle.onclick=()=>{body.hidden=!body.hidden;toggle.setAttribute("aria-expanded",String(!body.hidden))};
+   head.append(toggle,star);body.append(info,meaning);card.append(head,body);
+   if(options.explain){const explain=document.createElement("button");explain.className="word-explain";explain.textContent="AI 词义与变形";explain.onclick=()=>options.explain(token,source);body.append(explain)}
    $("wordDetail").append(card);updateStars();
    star.onclick=()=>{
     if(vocabulary.some(x=>x.term===lemma))vocabulary=vocabulary.filter(x=>x.term!==lemma);

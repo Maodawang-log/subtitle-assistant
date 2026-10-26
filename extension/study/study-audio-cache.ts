@@ -1,4 +1,5 @@
 import type { StudyAudioCue } from "./bounded-asr.js";
+import { repairAsrSegments } from "./cue-revisions.js";
 
 // Text only: no audio, model binaries, source URLs or signed CDN tokens. Entries
 // are ordered least-to-most recently used and capped again when read from disk.
@@ -33,7 +34,13 @@ function validatedEntry(raw: unknown): StudyAudioCacheEntry | undefined {
       || typeof cue.content !== "string" || !cue.content.trim() || cue.content.length > 4000) return;
     cues.push({ from: cue.from, to: cue.to, content: cue.content });
   }
-  return { key: value.key, cues };
+  return { key: value.key, cues:repairAsrSegments(cues) };
+}
+
+export function compactStudyAudioCache(entries:unknown[]):StudyAudioCacheEntry[]{
+  const windows=new Map<string,StudyAudioCacheEntry>();
+  for(const entry of entries){const valid=validatedEntry(entry);if(!valid)continue;const identity=JSON.parse(valid.key);const window=JSON.stringify(identity.slice(0,5));windows.delete(window);windows.set(window,valid)}
+  return [...windows.values()];
 }
 
 export function createChromeStudyAudioCache(limit = 64): StudyAudioCacheStore {
@@ -43,13 +50,10 @@ export function createChromeStudyAudioCache(limit = 64): StudyAudioCacheStore {
       const stored = await chrome.storage.local.get(STUDY_AUDIO_CACHE_STORAGE_KEY);
       const entries = stored[STUDY_AUDIO_CACHE_STORAGE_KEY];
       if (!Array.isArray(entries)) return [];
-      return entries.slice(-maxEntries).flatMap((entry) => {
-        const valid = validatedEntry(entry);
-        return valid ? [valid] : [];
-      });
+      return compactStudyAudioCache(entries).slice(-maxEntries);
     },
     async write(entries) {
-      await chrome.storage.local.set({ [STUDY_AUDIO_CACHE_STORAGE_KEY]: entries.slice(-maxEntries) });
+      await chrome.storage.local.set({ [STUDY_AUDIO_CACHE_STORAGE_KEY]: compactStudyAudioCache(entries).slice(-maxEntries) });
     }
   };
 }

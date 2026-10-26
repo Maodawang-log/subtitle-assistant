@@ -1,15 +1,21 @@
 import path from 'node:path';
-import {mkdir,readFile} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,cp} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {REPO_ROOT,launchBrowser,attachPage,createWorkerSession,screenshot,teardown,waitFor,writeEvidence,artifactDir,log} from './harness.mjs';
-const out=artifactDir('study-native-manager-2.6.4.0'),distDir=path.join(REPO_ROOT,'dist-study'),packageDir=path.join(REPO_ROOT,'.scratch/model-manager-package'),installed=path.join(out,'temporary-connection'),temp=path.join(REPO_ROOT,'.scratch/browser-temp');
+const out=artifactDir('study-native-manager-2.6.5.0'),distDir=path.join(out,'isolated-dist'),packageDir=path.join(out,'isolated-package'),installed=path.join(out,'temporary-connection'),temp=path.join(REPO_ROOT,'.scratch/browser-temp');
+// Test-only host name isolates existing user registrations, including a live 1.0 manager.
+const productHost='com.biliscript.local_models',testHost='com.biliscript.local_models_audit2650';
+await cp(path.join(REPO_ROOT,'dist-study'),distDir,{recursive:true});await cp(path.join(REPO_ROOT,'.scratch/model-manager-package'),packageDir,{recursive:true});
+for(const file of [path.join(distDir,'entry/study-background.js'),path.join(packageDir,'Install-Connection.ps1'),path.join(packageDir,'Uninstall-Connection.ps1')])await writeFile(file,(await readFile(file,'utf8')).replaceAll(productHost,testHost));
+const packageHashes=JSON.parse(await readFile(path.join(packageDir,'package-hashes.json'),'utf8'));for(const name of Object.keys(packageHashes))packageHashes[name]=createHash('sha256').update(await readFile(path.join(packageDir,name))).digest('hex');await writeFile(path.join(packageDir,'package-hashes.json'),JSON.stringify(packageHashes));
 await mkdir(temp,{recursive:true});process.env.TEMP=temp;process.env.TMP=temp;
-const checks=[],evidence={scope:'real Edge Native Messaging launcher and temporary HKCU connection; existing shared ASR read-only; no model weights downloaded',checks},cdps=[];
+const checks=[],evidence={scope:'real Edge Native Messaging launcher and temporary test-only host-name HKCU connection; production registrations and shared ASR read-only; no model weights downloaded',checks},cdps=[];
 let browser,page,worker,registered=false;
 const check=(name,ok,detail)=>{checks.push({name,ok:!!ok,detail});if(!ok)throw new Error(name+': '+JSON.stringify(detail));log('PASS '+name)};
 const ps=(file,args=[])=>execFileSync('powershell.exe',['-NoProfile','-File',file,...args],{encoding:'utf8',windowsHide:true,timeout:30000});
 try{
- const before=execFileSync('powershell.exe',['-NoProfile','-Command',"@('HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.biliscript.local_models','HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.biliscript.local_models') | ForEach-Object { Test-Path -LiteralPath $_ }"],{encoding:'utf8',windowsHide:true}).trim();
+ const before=execFileSync('powershell.exe',['-NoProfile','-Command',"@('HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.biliscript.local_models_audit2650','HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.biliscript.local_models_audit2650') | ForEach-Object { Test-Path -LiteralPath $_ }"],{encoding:'utf8',windowsHide:true}).trim();
  check('test-host-registration-was-absent',!before.includes('True'));
  browser=await launchBrowser({distDir,profilePrefix:'study-native-manager-',muted:true,sync:false});page=await attachPage(browser);cdps.push(page.cdp);
  worker=createWorkerSession({pageCdp:page.cdp,browser,distDir});if(!await worker.ensureAlive())throw new Error('No extension worker');cdps.push(worker.handle.cdp);
@@ -21,7 +27,7 @@ try{
  await page.cdp.send('Page.navigate',{url:`chrome-extension://${id}/study/options.html`});
  await waitFor('native manager connected',()=>page.cdp.evaluate("document.getElementById('connectionHelp')?.hidden===true"),{timeoutMs:30000});
  const state=await page.cdp.evaluate("chrome.runtime.sendMessage({type:'study-model-manager',action:'status',args:{}})");
- check('real-native-roundtrip-status',state.ok===true&&state.data.models.length===3,state);
+ check('real-native-roundtrip-status',state.ok===true&&state.data.protocolVersion===2&&state.data.version==='1.1.0'&&state.data.models.length>=3,state);
  check('reuse-existing-small-and-medium',state.data.models.filter(x=>x.installed&&!x.owned).map(x=>x.id).join(',')==='small,medium');
  check('medium-setting-not-reset',await page.cdp.evaluate("document.getElementById('asrModel').value==='medium'"));
  if(state.data.service&&!state.data.managedService){
@@ -44,6 +50,6 @@ try{
  check('real-content-script-cannot-manage-models',rejected?.ok===false,rejected);
 }catch(error){evidence.error=String(error.stack);log(error.message);process.exitCode=1}
 finally{
- if(registered){try{evidence.uninstallOutput=ps(path.join(installed,'Uninstall-Connection.ps1'));const remaining=execFileSync('powershell.exe',['-NoProfile','-Command',"@('HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.biliscript.local_models','HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.biliscript.local_models') | ForEach-Object { Test-Path -LiteralPath $_ }"],{encoding:'utf8',windowsHide:true}).trim();check('temporary-registration-restored',!remaining.includes('True'));}catch(e){evidence.restoreError=String(e);process.exitCode=1}}
+ if(registered){try{evidence.uninstallOutput=ps(path.join(installed,'Uninstall-Connection.ps1'));const remaining=execFileSync('powershell.exe',['-NoProfile','-Command',"@('HKCU:\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\com.biliscript.local_models_audit2650','HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.biliscript.local_models_audit2650') | ForEach-Object { Test-Path -LiteralPath $_ }"],{encoding:'utf8',windowsHide:true}).trim();check('temporary-registration-restored',!remaining.includes('True'));}catch(e){evidence.restoreError=String(e);process.exitCode=1}}
  await teardown({browser,cdps});evidence.failed=checks.filter(x=>!x.ok);await writeEvidence(out,evidence);
 }

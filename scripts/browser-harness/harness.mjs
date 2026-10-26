@@ -195,9 +195,10 @@ export async function launchBrowser({
   sync = false,
   viewport = DEFAULT_VIEWPORT,
   extraArgs = [],
+  loadExtension = true,
   profilePrefix = "biliscript-harness-"
 } = {}) {
-  if (!existsSync(path.join(distDir, "manifest.json"))) {
+  if (loadExtension && !existsSync(path.join(distDir, "manifest.json"))) {
     throw new Error(`dist 里没有 manifest.json：${distDir}（先跑 pnpm build）`);
   }
   const port = await freePort();
@@ -223,8 +224,7 @@ export async function launchBrowser({
     "--no-first-run",
     "--no-default-browser-check",
     `--user-data-dir=${profileDir}`,
-    `--disable-extensions-except=${distDir}`,
-    `--load-extension=${distDir}`,
+    ...(loadExtension ? [`--disable-extensions-except=${distDir}`, `--load-extension=${distDir}`] : ["--disable-extensions"]),
     `--remote-debugging-port=${port}`,
     `--window-size=${viewport.width},${viewport.height}`,
     ...extraArgs,

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { setupModelManager } from "./model-manager-ui.js";
+import { setupAppearance } from "./appearance.js";
 import { ZH_DICTIONARY,DICTIONARIES,DICTIONARY_ORIGINS,checkDictionaryUpdate } from "./dictionary-catalog.js";
 import { dictionaryInventory,setDefaultDictionary,lookupDictionary } from "./dictionary-db.js";
 const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let previous={},release=ZH_DICTIONARY,installed,busy=true,operation="recover",inventory={installed:[],defaults:{}},lookupEpoch=0;
@@ -11,7 +12,8 @@ $("save").onclick=async()=>{
  try{
   const u=new URL($("baseUrl").value.trim());if(u.username||u.password||u.search||u.hash||u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("请输入不含凭据或查询参数的HTTPS或本机HTTP地址");
   const granted=await chrome.permissions.request({origins:[u.origin+"/*"]});if(!granted)throw new Error("未允许访问该接口域名，未保存");
-  const data={...previous,asrModel:$("asrModel").value,autoStart:false,autoTranslate:false,baseUrl:u.href.replace(/\/+$/,""),model:$("model").value.trim(),compatibility:$("compatibility").value,apiKey:$("apiKey").value.trim()||previous.apiKey||""};
+  const latest=(await chrome.storage.local.get(key))[key]||{};
+  const data={...latest,asrModel:$("asrModel").value,autoStart:false,autoTranslate:false,baseUrl:u.href.replace(/\/+$/,""),model:$("model").value.trim(),compatibility:$("compatibility").value,apiKey:$("apiKey").value.trim()||latest.apiKey||""};
   if(!data.model)throw new Error("请填写模型名");await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status","已保存。关闭字幕再开启会应用新设置。");
  }catch(e){note("status",e.message,true)}
 };
@@ -79,3 +81,4 @@ $("lookup").onclick=async()=>{
 };
 
 setupModelManager();
+setupAppearance();

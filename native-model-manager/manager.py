@@ -1,6 +1,6 @@
 """Fixed-action, local-user model manager. No browser key, arbitrary URL or command API."""
 from __future__ import annotations
-import ctypes, hashlib, ipaddress, json, os, re, shutil, socket, stat, subprocess, threading, time, urllib.request, uuid
+import ctypes, hashlib, ipaddress, json, os, re, shutil, socket, stat, subprocess, threading, time, urllib.request, uuid, copy
 from pathlib import Path
 
 
@@ -93,8 +93,14 @@ class Manager:
         self.install = read_json(self.home / 'host-config.json')
         self.legacy = safe_path(self.install['legacyBase'])
         self.catalog = catalog or read_json(self.home / 'model-catalog.json')
+        self.base_catalog = copy.deepcopy(self.catalog)
         self.state_file = self.home / 'manager-state.json'
         self.state = read_json(self.state_file, None) or {'owner': uuid.uuid4().hex, 'directory': str(self.legacy / 'managed-models'), 'models': {}}
+        self.state.setdefault('installations', {})
+        self.catalog_state = read_json(self.home / 'online-catalog.json', {})
+        self.catalog.update(self.catalog_state.get('models', {}))
+        self.catalog.update({key: value for key, value in self.state['installations'].items() if key not in self.catalog})
+        self.delete_tokens = {}
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.job = None
@@ -130,17 +136,19 @@ class Manager:
         for model, release in self.catalog.items():
             legacy = self.legacy / 'models' / ('faster-whisper-' + model)
             managed = self.state['models'].get(model)
-            if managed and model_files_valid(Path(managed), release):
-                result[model] = {'path': managed, 'owned': self.owns(Path(managed), model)}
-            elif model_files_valid(legacy, release):
-                result[model] = {'path': str(legacy), 'owned': False}
+            frozen = self.state['installations'].get(model, self.base_catalog.get(model, release))
+            if managed and model_files_valid(Path(managed), frozen):
+                result[model] = {'path': managed, 'owned': self.owns(Path(managed), model), 'release': frozen}
+            elif model in self.base_catalog and model_files_valid(legacy, self.base_catalog[model]):
+                result[model] = {'path': str(legacy), 'owned': False, 'release': self.base_catalog[model]}
         return result
 
     def owns(self, path, model):
         try:
             safe_path(path)
             marker = read_json(safe_path(path / '.study-owned.json', path), {})
-            return marker.get('owner') == self.state['owner'] and marker.get('model') == model and marker.get('revision') == self.catalog[model]['revision']
+            frozen = self.state['installations'].get(model, self.base_catalog.get(model, self.catalog[model]))
+            return marker.get('owner') == self.state['owner'] and marker.get('model') == model and marker.get('revision') == frozen['revision']
         except (ValueError, OSError, KeyError):
             return False
 
@@ -155,8 +163,13 @@ class Manager:
             busy = bool(health and (health.get('active') or health.get('queue')))
             other = bool(health and health.get('other_consumer_recent'))
             stopping = owned and not busy and not other
-            return {'version': '1.0.0', 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
-                    'models': [{'id': model, 'name': release['name'], 'bytes': sum(f['bytes'] for f in release['files'].values()), 'revision': release['revision'], 'source': 'https://huggingface.co/' + release['repo'], **installed.get(model, {}), 'installed': model in installed} for model, release in self.catalog.items()],
+            models=[]
+            for model, latest in self.catalog.items():
+                item=installed.get(model, {});release=item.get('release', latest)
+                models.append({'id':model,'name':release['name'],'bytes':sum(f['bytes'] for f in release['files'].values()),'revision':release['revision'],'availableRevision':latest['revision'],'source':'https://huggingface.co/'+release['repo'] if release.get('repo') else '', 'language':release.get('language','多语言（含日语）'),'japaneseSupported':release.get('japaneseSupported',True),'positioning':release.get('positioning','已有兼容模型；实际速度与效果取决于设备和音频。'), **{key:value for key,value in item.items() if key!='release'},'installed':model in installed})
+            return {'version': '1.1.0', 'protocolVersion':2,'capabilities':['onlineCatalog','importModel','deletePreview','legacyDefault'], 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
+                    'legacyDefault':legacy.get('default_model','small'),'legacyModels':[key for key,item in installed.items() if key in self.base_catalog and Path(item['path'])==self.legacy/'models'/('faster-whisper-'+key)],
+                    'catalog':{key:value for key,value in self.catalog_state.items() if key!='models'},'models':models,
                     'service': health, 'managedService': owned, 'canStop': stopping, 'starting': starting,
                     'stopReason': '服务正在识别或排队，暂不能停止。' if busy else '最近有其他客户端使用，暂不能停止共享服务。' if other else '当前服务可继续复用；如需在此启停，请先使用“首次接管现有服务”。' if health and not owned else '',
                     'job': dict(self.job) if self.job else None}
@@ -172,6 +185,7 @@ class Manager:
             if not parent.is_dir():
                 raise ValueError('请选择已存在的文件夹。')
             directory = safe_path(parent / 'BiliScriptModels', parent)
+            self.check_overlap(directory)
             if directory.exists() and any(directory.iterdir()):
                 marker = read_json(directory / '.study-root.json', {})
                 if marker.get('owner') != self.state['owner']:
@@ -179,6 +193,54 @@ class Manager:
             self.state['directory'] = str(directory)
             self.save()
             return self.status()
+
+    def check_overlap(self, path, allow_same=False):
+        path=safe_path(path)
+        for item in self.installed().values():
+            other=safe_path(item['path'])
+            if path==other and allow_same:continue
+            if path.is_relative_to(other) or other.is_relative_to(path):raise ValueError('目标与已有模型目录重叠，请选择独立目录。')
+        if path==self.home or self.home.is_relative_to(path) or path.is_relative_to(self.home) or self.legacy.is_relative_to(path):raise ValueError('目标与管理器或识别环境重叠，未修改。')
+
+    def refresh_catalog(self):
+        from catalog import fetch_catalog
+        with self.lock:
+            self.idle();self.cancel.clear();self.job={'kind':'catalog','phase':'catalog','done':0,'total':1}
+            def progress(done,total,repo):self.job.update(done=done,total=total,repository=repo)
+            def work():
+                try:
+                    result=fetch_catalog(progress=progress,cancel=self.cancel)
+                    if self.cancel.is_set():raise InterruptedError()
+                    with self.lock:
+                        self.catalog_state=result;atomic_json(safe_path(self.home/'online-catalog.json',self.home),result);self.catalog={**self.state['installations'],**self.base_catalog,**result['models']};self.job.update(phase='complete',message='已联网检查可用模型；未下载权重。')
+                except Exception as error:
+                    self.job.update(phase='cancelled' if self.cancel.is_set() else 'error',message='已取消目录检查。' if self.cancel.is_set() else '在线检查失败，保留上次目录。'+type(error).__name__)
+            self.thread=threading.Thread(target=work,daemon=True);self.thread.start();return self.status()
+
+    def import_model(self, value):
+        from model_files import inspect_model
+        with self.lock:
+            self.idle();path=safe_path(value)
+            for model,item in self.installed().items():
+                if safe_path(item['path'])==path:return self.status()
+            self.check_overlap(path)
+            release=inspect_model(path,safe_path);model='local-'+hashlib.sha256(str(path).casefold().encode()).hexdigest()[:16]
+            self.state['models'][model]=str(path);self.state['installations'][model]=release;self.catalog[model]=release;self.save();return self.status()
+
+    def choose_import(self):
+        from tkinter import Tk,filedialog
+        window=Tk();window.withdraw();window.attributes('-topmost',True)
+        try:selected=filedialog.askdirectory(parent=window,title='选择已有的完整 CTranslate2 Whisper 实体模型目录',mustexist=True)
+        finally:window.destroy()
+        return self.import_model(selected) if selected else self.status()
+
+    def set_legacy_default(self, model, confirm):
+        with self.lock:
+            self.idle()
+            if confirm!='change-original-default' or model not in self.status()['legacyModels']:raise ValueError('请选择已安装的原启动方式模型并明确确认。')
+            path=safe_path(self.legacy/'settings.json',self.legacy);settings=read_json(path,{})
+            backup=safe_path(self.home/('legacy-settings-backup-'+uuid.uuid4().hex+'.json'),self.home);atomic_json(backup,settings)
+            settings['default_model']=model;atomic_json(path,settings);return self.status()
 
     def choose_directory(self):
         from tkinter import Tk, filedialog
@@ -192,8 +254,10 @@ class Manager:
     def set_default(self, model):
         with self.lock:
             self.idle()
-            if model not in self.installed():
+            installed=self.installed()
+            if model not in installed:
                 raise ValueError('请先安装所选模型。')
+            if installed[model]['release'].get('japaneseSupported') is False:raise ValueError('此模型未确认支持日语，不能设为日语字幕默认。')
             self.state['default_model'] = model; self.save()
             return self.status()
 
@@ -243,7 +307,7 @@ class Manager:
                         if not re.fullmatch(r'[A-Za-z0-9_.-]+', name):
                             raise ValueError('模型清单文件名不合法。')
                         url = f"https://huggingface.co/{release['repo']}/resolve/{release['revision']}/{name}"
-                        digest = hashlib.sha256();size = 0
+                        digest = hashlib.sha256() if 'sha256' in expected else hashlib.sha1(b'blob '+str(expected['bytes']).encode()+b'\0');size = 0
                         if self.cancel.is_set(): raise InterruptedError()
                         with self.opener(url) as response, safe_path(stage / name, stage).open('xb') as target:
                             self.response = response
@@ -255,7 +319,7 @@ class Manager:
                                 if size > expected['bytes']: raise ValueError('模型文件超过固定清单大小。')
                                 target.write(chunk);digest.update(chunk);self.job['done'] += len(chunk)
                         self.response = None
-                        if size != expected['bytes'] or digest.hexdigest() != expected['sha256']:
+                        if size != expected['bytes'] or digest.hexdigest() != expected.get('sha256',expected.get('gitSha1')):
                             raise ValueError('模型完整性校验失败，原安装保持不变。')
                     if self.cancel.is_set(): raise InterruptedError()
                     with self.lock:
@@ -263,7 +327,7 @@ class Manager:
                         safe_path(stage, directory);safe_path(destination, directory)
                         atomic_json(stage / '.study-owned.json', {'owner': self.state['owner'], 'model': model, 'revision': release['revision']})
                         stage.rename(destination)
-                        self.state['models'][model] = str(destination);self.save();self.job['phase'] = 'complete'
+                        self.state['models'][model] = str(destination);self.state['installations'][model]=copy.deepcopy(release);self.save();self.job['phase'] = 'complete'
                 except Exception as exc:
                     self.job['phase'] = 'cancelled' if self.cancel.is_set() or isinstance(exc, InterruptedError) else 'error'
                     self.job['message'] = '已取消，原安装保持不变。' if self.job['phase'] == 'cancelled' else str(exc)
@@ -282,27 +346,58 @@ class Manager:
             except Exception: pass
         return self.status()
 
+    def deletion_snapshot(self, model):
+        from model_files import file_identity
+        installed=self.installed();item=installed.get(model)
+        if not item:raise ValueError('模型已不存在或文件已改变，请刷新状态。')
+        path=safe_path(item['path']);self.check_overlap(path,allow_same=True)
+        aliases=[key for key,value in installed.items() if safe_path(value['path'])==path]
+        legacy=read_json(self.legacy/'settings.json',{});default=self.state.get('default_model',legacy.get('default_model','small'))
+        if default in aliases:raise ValueError('这是当前默认模型，请先明确选择其他默认模型。')
+        old_default=legacy.get('default_model','small')
+        if old_default in aliases or safe_path(self.legacy/'models'/('faster-whisper-'+old_default))==path:raise ValueError('这是原启动方式的默认模型；请先在“原启动方式默认”明确切换，再删除。')
+        health=self.health()
+        if health and (health.get('foreign') or health.get('active') or health.get('queue') or any(key in (health.get('available_models') or []) for key in aliases) or any(key in (health.get('default_model'),(health.get('backend') or {}).get('model')) for key in aliases) or health.get('model_path') and safe_path(health['model_path'])==path):raise ValueError('服务仍可使用这个模型，请先显式切换并安全停止服务，再删除。')
+        if not health:
+            service=read_json(self.home/'managed-service.json',{})
+            if service.get('pid') and process_stamp(service['pid'])==service.get('stamp'):raise ValueError('服务进程仍在，暂不能确认模型未使用。')
+            try:
+                with socket.create_connection(('127.0.0.1',self.port),timeout=.3):raise ValueError('本地服务端口仍在使用，但状态未确认；未删除模型。')
+            except (ConnectionRefusedError,TimeoutError):pass
+        for child in path.iterdir():safe_path(child,path)
+        names=set(item['release']['files'])
+        if item['owned']:names.add('.study-owned.json')
+        files={}
+        for name in names:
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+',name):raise ValueError('不安全的模型文件名。')
+            file=safe_path(path/name,path)
+            if not file.is_file():raise ValueError('模型文件已变化。')
+            files[name]=file_identity(file)
+        return {'model':model,'path':str(path),'files':files,'directoryIdentity':file_identity(path)[:2],'aliases':aliases,'bytes':sum(value[2] for value in files.values()),'preservedFiles':[file.name for file in path.iterdir() if file.name not in names]}
+
+    def prepare_delete(self, model):
+        with self.lock:
+            self.idle();snapshot=self.deletion_snapshot(model);token=uuid.uuid4().hex
+            self.delete_tokens={key:value for key,value in self.delete_tokens.items() if value['until']>time.monotonic()}
+            self.delete_tokens[token]={'until':time.monotonic()+120,'snapshot':snapshot}
+            return {**self.status(),'deletion':{**snapshot,'confirm':token}}
+
     def delete(self, model, confirm):
         with self.lock:
-            self.idle()
-            if model not in self.catalog or confirm != model:
-                raise ValueError('删除前需要明确确认所选模型。')
-            path = Path(self.state['models'].get(model, ''))
-            if not path.is_absolute() or not self.owns(path, model):
-                raise ValueError('只允许删除管理器安装的模型，已有 small/medium 不会删除。')
-            health = self.health()
-            if health and (health.get('active') or health.get('queue') or model in (health.get('default_model'), (health.get('backend') or {}).get('model'))):
-                raise ValueError('服务正在使用该模型，请先切换并安全停止服务。')
-            if self.state.get('default_model') == model:
-                raise ValueError('请先选择另一个默认模型。')
-            safe_path(path)
-            expected = set(self.catalog[model]['files']) | {'.study-owned.json'}
-            contents = list(path.iterdir())
-            if {p.name for p in contents} != expected or any(not safe_path(p, path).is_file() for p in contents):
-                raise ValueError('模型目录包含额外或不安全的文件，未删除。')
-            for p in contents: p.unlink()
-            path.rmdir();self.state['models'].pop(model);self.save()
-            return self.status()
+            self.idle();plan=self.delete_tokens.pop(confirm,None)
+            if not plan or plan['until']<time.monotonic() or plan['snapshot']['model']!=model:raise ValueError('请先查看准确路径和空间，再明确确认删除。')
+            current=self.deletion_snapshot(model)
+            if current!=plan['snapshot']:raise ValueError('确认后文件或目录发生变化，未删除；请重新检查。')
+            path=safe_path(current['path'])
+            # Known files only, largest weight first. Extra user files remain;
+            # no recursive deletion of imported or legacy directories.
+            for name in sorted(current['files'],key=lambda name:name!='model.bin'):
+                safe_path(path/name,path).unlink()
+            if not any(path.iterdir()):path.rmdir()
+            for alias in current['aliases']:
+                self.state['models'].pop(alias,None);self.state['installations'].pop(alias,None)
+                if alias.startswith('local-'):self.catalog.pop(alias,None)
+            self.save();return self.status()
 
     def start(self, model=None):
         with self.lock:
@@ -322,6 +417,7 @@ class Manager:
             installed = self.installed();legacy = read_json(self.legacy / 'settings.json', {})
             model = model or self.state.get('default_model', legacy.get('default_model', 'small'))
             if model not in installed: raise ValueError('默认模型尚未安装。')
+            if installed[model]['release'].get('japaneseSupported') is False:raise ValueError('此模型未确认支持日语，不能作为日语服务默认启动。')
             python = safe_path(self.legacy / '.venv/Scripts/python.exe', self.legacy)
             server = safe_path(self.home / 'service/server.py', self.home)
             if not python.is_file() or not server.is_file(): raise ValueError('配套 Python 环境或服务文件不完整。')
@@ -376,11 +472,11 @@ class Manager:
             return self.start(model)
 
     def dispatch(self, action, args):
-        allowed = {'status': set(), 'chooseDirectory': set(), 'download': {'model'}, 'cancel': set(), 'setDefault': {'model'}, 'delete': {'model', 'confirm'}, 'start': {'model'}, 'stop': set(), 'handover': {'model', 'confirm'}, 'restart': {'model'}}
+        allowed = {'status': set(), 'chooseDirectory': set(), 'refreshCatalog':set(), 'chooseImport':set(), 'prepareDelete':{'model'}, 'setLegacyDefault':{'model','confirm'}, 'download': {'model'}, 'cancel': set(), 'setDefault': {'model'}, 'delete': {'model', 'confirm'}, 'start': {'model'}, 'stop': set(), 'handover': {'model', 'confirm'}, 'restart': {'model'}}
         if action not in allowed or not isinstance(args, dict) or set(args) - allowed[action]:
             raise ValueError('不支持的管理操作或参数。')
         if 'model' in args and args['model'] not in self.catalog: raise ValueError('未知模型。')
-        return {'status': lambda: self.status(), 'chooseDirectory': lambda: self.choose_directory(), 'download': lambda: self.download(args['model']), 'cancel': lambda: self.cancel_download(), 'setDefault': lambda: self.set_default(args['model']), 'delete': lambda: self.delete(args['model'], args.get('confirm')), 'start': lambda: self.start(args.get('model')), 'stop': lambda: self.stop(), 'handover': lambda: self.handover(args.get('model'), args.get('confirm')), 'restart': lambda: self.restart(args['model'])}[action]()
+        return {'status': lambda: self.status(), 'chooseDirectory': lambda: self.choose_directory(), 'refreshCatalog':lambda:self.refresh_catalog(), 'chooseImport':lambda:self.choose_import(), 'prepareDelete':lambda:self.prepare_delete(args['model']), 'setLegacyDefault':lambda:self.set_legacy_default(args['model'],args.get('confirm')), 'download': lambda: self.download(args['model']), 'cancel': lambda: self.cancel_download(), 'setDefault': lambda: self.set_default(args['model']), 'delete': lambda: self.delete(args['model'], args.get('confirm')), 'start': lambda: self.start(args.get('model')), 'stop': lambda: self.stop(), 'handover': lambda: self.handover(args.get('model'), args.get('confirm')), 'restart': lambda: self.restart(args['model'])}[action]()
 
     def restart(self, model):
         with self.lock:

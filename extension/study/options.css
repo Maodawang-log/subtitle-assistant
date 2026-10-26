@@ -2,3 +2,6 @@
  .catalog{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.catalog button[aria-pressed=true]{border-color:#32644b;background:#eaf2e6}.installed{margin-top:24px}.installed p{font-size:13px;margin:6px 0;color:#526b57}
 
 .model-card{border:1px solid #dce6de;border-radius:10px;padding:14px;margin:10px 0}.model-card p{white-space:pre-wrap;overflow-wrap:anywhere}.model-card button{margin-right:8px}.catalog .model-card{display:block}#modelDirectory{overflow-wrap:anywhere}#extensionId{user-select:all}
+/* Subtitle preview keeps the same contrast treatment as the video overlay. */
+.appearance-preview{padding:18px;background:#34483e;border-radius:10px;margin-top:14px;text-align:center;overflow-wrap:anywhere;text-shadow:1px 1px 3px #000,-1px -1px 3px #000,0 2px 8px #000}.appearance-preview rt{font-size:.4em}.appearance-preview span{line-height:1.7}
+.model-source{font-size:12px;margin-left:10px;color:#2b6249}.model-card{min-width:0}.model-card .note{overflow-wrap:anywhere;white-space:pre-wrap}#models.catalog{align-items:stretch}#catalogState{margin:8px 0}#managerUpgrade{padding:12px;background:#fff3dc;border-radius:8px}

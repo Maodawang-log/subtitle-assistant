@@ -41,7 +41,7 @@ try{
  await click(el('show'));
  await waitFor('Japanese token overlay',()=>page.cdp.evaluate(`document.getElementById('biliscript-study-overlay')?.shadowRoot.querySelectorAll('.jp-word').length>5`),{timeoutMs:30000});
  check('Japanese-first-no-AI',!(await ai()).length&&await page.cdp.evaluate(`${overlay}.querySelector('.zh').textContent===''`));
- check('titles-removed-and-four-tabs',await page.cdp.evaluate(`${host}.querySelectorAll('[data-pane]').length===4&&!${host}.querySelector('.head strong')&&!${bar}.querySelector('.study-mark')`));
+ check('titles-removed-and-five-tabs',await page.cdp.evaluate(`${host}.querySelectorAll('[data-pane]').length===5&&!${host}.querySelector('.head strong')&&!${bar}.querySelector('.study-mark')`));
  await screenshotAs('01-native-entry-and-Japanese');
  await click(`${overlay}.querySelectorAll('.jp-word')[2]`);
  check('single-click-local-word-only',await pane()==='vocabulary'&&!(await ai()).length);
