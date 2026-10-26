@@ -55,20 +55,42 @@
 .setup-link{margin:8px 0}.selection-source{white-space:pre-wrap;color:var(--muted);font-size:13px;border-bottom:1px solid var(--line);padding-bottom:8px}
 .saved-word summary{cursor:pointer;padding-right:42px}.saved-preview{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;font-size:12px;line-height:1.6;color:var(--muted);white-space:pre-wrap;margin-top:5px}.saved-word details[open] .saved-preview{display:none}
 .word-toggle{display:flex;align-items:center;gap:7px;flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:0;white-space:normal}.word-toggle::before{content:'▾';font-size:15px;flex:none}.word-toggle[aria-expanded=false]::before{content:'▸'}.word-collapse-tools{display:flex;gap:8px;margin-bottom:8px}.word-collapse-tools button{font-size:12px;padding:4px 8px}.word-heading .word-star{flex:none}.word-toggle h2{overflow-wrap:anywhere}
-/* One-line normal-mode controls; the fullscreen transport keeps its labels. */
-:host(:not([data-fullscreen])) #learningControls{padding:5px 8px;overflow:visible}
-:host(:not([data-fullscreen])) .toolbar{flex-wrap:nowrap;gap:5px;min-height:34px}
-:host(:not([data-fullscreen])) .transport,:host(:not([data-fullscreen])) .actions{flex-wrap:nowrap;gap:4px;padding-right:4px}
-:host(:not([data-fullscreen])) .toolbar button{font-size:0;min-height:30px;padding:4px 7px}
-:host(:not([data-fullscreen])) .toolbar button::before{font-size:12px}
-:host(:not([data-fullscreen])) #prev::before{content:'←'}:host(:not([data-fullscreen])) #pause::before{content:'Ⅱ'}:host(:not([data-fullscreen])) #replay::before{content:'↻'}:host(:not([data-fullscreen])) #next::before{content:'→'}:host(:not([data-fullscreen])) #loop::before{content:'循环'}:host(:not([data-fullscreen])) #translate::before{content:'双语'}:host(:not([data-fullscreen])) #explain::before{content:'讲解'}:host(:not([data-fullscreen])) #paragraph::before{content:'邻句'}:host(:not([data-fullscreen])) #readPanel::before{content:'▤'}
+/* Preserve the site's native player geometry; readable controls may wrap. */
+:host(:not([data-fullscreen])) #learningControls{padding:10px 12px;overflow:visible}
+:host(:not([data-fullscreen])) .toolbar{flex-wrap:wrap;gap:8px 10px;min-height:38px}
+:host(:not([data-fullscreen])) .transport,:host(:not([data-fullscreen])) .actions{flex:0 1 auto;flex-wrap:wrap;gap:6px}
+:host(:not([data-fullscreen])) .toolbar button{font-size:14px;min-height:38px;line-height:20px;padding:8px 10px}
 :host(:not([data-fullscreen])) #record,:host(:not([data-fullscreen])) #stopStudy{display:none}
-:host(:not([data-fullscreen])) #position{font-size:10px;flex:0 1 auto;white-space:nowrap}
-:host(:not([data-fullscreen])) .panel{height:var(--study-panel-height,min(690px,calc(100vh - 140px)));margin-bottom:0}
-.head #enable{margin-right:0;flex:none}.head #status{flex:1;min-width:0;margin:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}.head #settings,.head #fold{flex:none}
+:host(:not([data-fullscreen])) #position{font-size:13px;flex:0 0 auto;white-space:nowrap}
+:host(:not([data-fullscreen])) .panel{height:var(--study-panel-height,min(760px,calc(100vh - 140px)));margin-bottom:0}
+.head #enable{margin-right:0;flex:none}.head #status{flex:1;min-width:0;margin:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}.head #settings,.head #fold{flex:none}
 :host([data-fullscreen]) .toolbar #status{flex:1 1 100px;min-width:0;max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0;font-size:11px}
+.practice-intro,.practice-cue-label,.practice-original-label,.practice-recording-label{display:none}
+.practice-current{display:contents}
+.mic-devices{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:12px 0}.mic-devices label{font-size:12px}.mic-devices select{flex:1;min-width:100px;max-width:100%;font-size:12px}.mic-devices button{font-size:11px;padding:4px 6px}
+:host(:not([data-fullscreen])) #practiceHome{padding:20px}
 :host(:not([data-fullscreen])) #practice{border:0;padding:0;margin:0;background:transparent}
-:host(:not([data-fullscreen])) #practiceClose{display:none}.mic-devices{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:12px 0}.mic-devices label{font-size:12px}.mic-devices select{flex:1;min-width:100px;max-width:100%;font-size:12px}.mic-devices button{font-size:11px;padding:4px 6px}
-#practiceHome .practice-actions button{flex:1 1 40%;font-size:13px}#practiceHome #micOriginal{flex-basis:100%}.tabs button{font-size:13px;padding:8px 4px}
-@media(max-width:900px){:host(:not([data-fullscreen])) .toolbar{overflow:auto;scrollbar-width:thin}:host(:not([data-fullscreen])) .toolbar button{padding:4px 6px}}
+:host(:not([data-fullscreen])) #practiceClose{display:none}
+:host(:not([data-fullscreen])) #practice header strong{font-size:18px}
+:host(:not([data-fullscreen])) .practice-intro{display:block;color:var(--muted);font-size:13px;line-height:1.7;margin:6px 0 18px}
+:host(:not([data-fullscreen])) .practice-current{display:block;background:#f0f7ef;border-radius:10px;padding:16px;margin-bottom:18px}
+:host(:not([data-fullscreen])) .practice-cue-label{display:inline-block;color:#39664c;background:#dbeeda;border-radius:5px;font-size:12px;padding:2px 8px;margin-bottom:10px}
+:host(:not([data-fullscreen])) #practiceCue{font-size:17px;line-height:1.8;margin:0;overflow-wrap:anywhere;color:#233d2b}
+:host(:not([data-fullscreen])) .mic-devices{gap:8px;margin:0 0 18px}
+:host(:not([data-fullscreen])) .mic-devices label{font-size:13px}
+:host(:not([data-fullscreen])) .mic-devices select{font-size:13px;min-height:36px;padding:6px}
+:host(:not([data-fullscreen])) .mic-devices button{font-size:12px;min-height:32px;margin-left:auto}
+:host(:not([data-fullscreen])) .practice-actions{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:10px}
+:host(:not([data-fullscreen])) .practice-actions button{font-size:14px;min-height:40px;padding:8px 10px}
+:host(:not([data-fullscreen])) #micStart{grid-area:1/1;min-height:44px}
+:host(:not([data-fullscreen])) #micStop{grid-area:1/2;min-height:44px}
+:host(:not([data-fullscreen])) .practice-original-label,:host(:not([data-fullscreen])) .practice-recording-label{display:block;grid-column:1/-1;font-weight:600;font-size:14px;color:#315b41;border-top:1px solid var(--line);padding-top:15px;margin-top:6px}
+:host(:not([data-fullscreen])) .practice-original-label{grid-row:2}
+:host(:not([data-fullscreen])) #micOriginal{grid-area:3/1/4/-1}
+:host(:not([data-fullscreen])) .practice-recording-label{grid-row:4}
+:host(:not([data-fullscreen])) #micReplay{grid-area:5/1}
+:host(:not([data-fullscreen])) #micSave{grid-area:5/2}
+:host(:not([data-fullscreen])) #micAudio{grid-area:6/1/7/-1}
+:host(:not([data-fullscreen])) #practiceStatus{line-height:1.7;margin:14px 0 0}
+.tabs button{font-size:13px;padding:8px 4px}
 .cue-timing{display:flex;flex-direction:column;align-items:center;gap:4px;flex:none}.cue-proofread{padding:2px 4px;font-size:10px;background:transparent;color:var(--muted)}.proof-section{margin:0 0 18px}.proof-section p{white-space:pre-wrap;margin:6px 0}.proof-actions{display:flex;gap:8px;flex-wrap:wrap}.proof-apply{background:var(--green);color:#fff}

@@ -32,7 +32,8 @@
 | [0023](0023-language-study-catalog-and-flow-slot.md) | 语言学习助手的词典目录与页面占位 | 有效 | 补充0022：外层播放器占位、可见更名与按语言共存的词典目录 |
 | [0024](0024-study-mount-after-site-hydration.md) | 学习控件等待 B 站页面接管后再挂载 | 有效 | 为0023增加SSR接管门槛；修复未开启学习时也会中断站点初始化的问题 |
 | [0025](0025-study-subtitles-selection-and-local-model-manager.md) | 字幕开关、选段讲解与本地模型管理 | 部分被取代 | 固定目录与仅自有模型删除由0026取代，其余保留 |
-| [0026](0026-study-practice-revisions-and-model-catalog.md) | 紧凑跟读、字幕修订与可更新的本地模型目录 | 有效 | 七项迭代；部分取代0025，保留0024接管门槛 |
+| [0026](0026-study-practice-revisions-and-model-catalog.md) | 紧凑跟读、字幕修订与可更新的本地模型目录 | 部分被取代 | 普通窗口尺寸与句控由0027取代，其余保留 |
+| [0027](0027-study-native-proportions-and-readable-controls.md) | 保留原生播放器比例与可读句控 | 有效 | 按认可概念图纠正0026的视觉偏差，保留站点原生尺寸和全部学习功能 |
 
 编号一经分配不复用：裁决被推翻或被取代时新开一篇（见体例规则 3），退役编号留空行占位，不重开。
 
