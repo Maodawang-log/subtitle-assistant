@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { REPO_ROOT, launchBrowser, attachPage, createWorkerSession, screenshot, teardown, waitFor, sleep, writeEvidence, artifactDir, log } from './harness.mjs';
@@ -11,6 +11,7 @@ const distDir = path.join(REPO_ROOT, 'dist-study'), temp = artifactDir('language
 await mkdir(temp, { recursive: true }); process.env.TEMP = temp; process.env.TMP = temp;
 let browser, page, worker, mode = 'english-cc';
 const cdps = [], checks = [], pending = new Set();
+const downloads=path.join(out,'downloads');await mkdir(downloads,{recursive:true});
 const traffic = { cc: [], asr: [], cancel: [], nativeAudio: [], blocked: [] };
 const evidence = { scope: 'Isolated headless Edge, real built extension/MV3/native observer/DOM/pointer gestures. Synthetic Bilibili HTML, CC and media metadata, silent Blob media, CDP-replayed 206 audio probe, ASR responses and local dictionary fixture; AI fetch returns a fixture without network. No live Bilibili content, microphone, model loading, paid API or production native registration.', checks, traffic, exceptions: [] };
 evidence.buildHashes=Object.fromEntries(await Promise.all(['study/options.html','study/options.css','study/options.js','study/options.js.map','study/ui.css','entry/study.js','entry/study.js.map','entry/study-background.js','entry/study-background.js.map'].map(async name=>[name,createHash('sha256').update(await readFile(path.join(distDir,name))).digest('hex')])));
@@ -115,6 +116,24 @@ async function drag(root, first, last) {
   for (let i = 1; i <= 16; i++) { await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.a.x + (points.b.x - points.a.x) * i / 16, y: points.a.y + (points.b.y - points.a.y) * i / 16, buttons: 1 }); await sleep(15); }
   await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...points.b, button: 'left', clickCount: 1 }); await sleep(180);
 }
+async function downloadClick(id,extension){
+ const folder=path.join(downloads,String((evidence.downloads?.length||0)+1));await mkdir(folder,{recursive:true});
+ await page.cdp.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:folder});await click(el(id));
+ const name=await waitFor('download '+extension,async()=> (await readdir(folder)).find(n=>n.endsWith('.'+extension)));
+ const data=await readFile(path.join(folder,name));
+ (evidence.downloads||=[]).push({name:path.relative(out,path.join(folder,name)),bytes:data.length,sha256:createHash('sha256').update(data).digest('hex')});return data.toString('utf8');
+}
+async function sidebarCheck(mode){
+ const before=await activity(),state=await page.cdp.evaluate(`(()=>{const scroll=${host}.querySelector('.pane:not([hidden]) .scroll');scroll.scrollTop=110;const video=document.querySelector('video');return {scroll:scroll.scrollTop,height:scroll.clientHeight,contentHeight:scroll.scrollHeight,full:document.getElementById('biliscript-japanese-study').hasAttribute('data-fullscreen'),pane:${host}.querySelector('[data-pane].selected').dataset.pane,time:video.currentTime,paused:video.paused,bilingual:${el('translate')}.getAttribute('aria-pressed')}})()`);
+ check(mode+'-sidebar-label-visible',await page.cdp.evaluate(`${el('readPanel')}.textContent==='收起侧边栏'&&${el('readPanel')}.getAttribute('aria-expanded')==='true'`));
+ await click(el('readPanel'));
+ check(mode+'-sidebar-label-hidden',await page.cdp.evaluate(`document.getElementById('biliscript-japanese-study').hidden&&${el('readPanel')}.textContent==='展开侧边栏'&&${el('readPanel')}.title==='展开侧边栏'&&${el('readPanel')}.getAttribute('aria-expanded')==='false'`));
+ await click(el('readPanel'));
+ const after=await page.cdp.evaluate(`(()=>{const scroll=${host}.querySelector('.pane:not([hidden]) .scroll'),video=document.querySelector('video');return {scroll:scroll.scrollTop,height:scroll.clientHeight,contentHeight:scroll.scrollHeight,full:document.getElementById('biliscript-japanese-study').hasAttribute('data-fullscreen'),pane:${host}.querySelector('[data-pane].selected').dataset.pane,time:video.currentTime,paused:video.paused,bilingual:${el('translate')}.getAttribute('aria-pressed')}})()`);
+ check(mode+'-sidebar-preserves-reading-and-playback',JSON.stringify(state)===JSON.stringify(after)&&sameActivity(before,await activity()),{before:state,after});
+ const moved=await page.cdp.evaluate(`(()=>{const scroll=${host}.querySelector('.pane:not([hidden]) .scroll');scroll.scrollTop=Math.max(0,scroll.scrollTop-40);return scroll.scrollTop})()`);await sleep(550);
+ check(mode+'-manual-scroll-after-reopen-does-not-snap-back',await page.cdp.evaluate(`${host}.querySelector('.pane:not([hidden]) .scroll').scrollTop===${moved}`));
+}
 async function shot(name) { await screenshot(page.cdp, path.join(out, name + '.png')); }
 async function navigateVideo(video) {
   await page.cdp.send('Page.navigate', { url: urlFor(video) });
@@ -178,7 +197,7 @@ try {
   let library=await worker.evaluate(`(async()=> (await chrome.storage.local.get('biliscriptStudyLibraryV1')).biliscriptStudyLibraryV1)()`);
   check('video-bookmark-keeps-current-material-and-sentence-star-without-full-transcription',Object.values(library.bookmarks).length===2&&Object.values(library.bookmarks).every(b=>b.bvid===fixture.videos[0].bvid&&b.page===1&&b.language==='en')&&traffic.asr.length===0);
   await click(el('summaryGenerate'));await waitFor('grounded summary',()=>page.cdp.evaluate(`${el('videoSummary')}.textContent.includes('夹具中文概述')&&${el('learningStop')}.hidden`));
-  check('summary-chapters-expressions-grounded',await page.cdp.evaluate(`${el('videoSummary')}.textContent.includes('视频学习清单')&&${el('videoSummary')}.querySelectorAll('.evidence-line').length===3`));
+  check('summary-chapters-expressions-grounded',await page.cdp.evaluate(`!${el('videoSummary')}.textContent.includes('视频学习清单')&&${el('videoSummary')}.querySelectorAll('.evidence-line').length===2&&${el('videoLearning')}.textContent.includes('夹具表达')&&${el('videoSummary')}.querySelector('.chapter-card h3').textContent==='章节 1'`));
   check('summary-citations-share-existing-sentence-state',await page.cdp.evaluate(`[...${el('videoSummary')}.querySelectorAll('.save-sentence')].some(b=>b.getAttribute('aria-pressed')==='true')`));
   await click(`${el('videoSummary')}.querySelector('summary')`);await shot('02-summary-and-evidence');
   await click(`${el('videoSummary')}.querySelector('.save-sentence')`);await waitFor('summary cancel sync',()=>page.cdp.evaluate(`${firstStar()}.textContent==='☆'`));
@@ -194,6 +213,21 @@ try {
   check('unsupported-question-is-not-invented',await page.cdp.evaluate(`${el('videoConversation')}.querySelectorAll('.chat-turn').length===2`));
   library=await worker.evaluate(`(async()=> (await chrome.storage.local.get('biliscriptStudyLibraryV1')).biliscriptStudyLibraryV1)()`);
   check('conversation-records-do-not-duplicate-full-subtitles',library.records[key].conversation.every(t=>t.material.cues.length===0&&t.fingerprint.length===64&&t.evidence.length<=2));
+  const peerGroups=await page.cdp.evaluate(`[...${el('pane-video')}.firstElementChild.children].filter(x=>x.tagName==='DETAILS').map(x=>({title:x.firstElementChild.textContent,border:getComputedStyle(x).borderTopWidth,radius:getComputedStyle(x).borderRadius,open:x.open}))`);
+  check('five-peer-card-groups',JSON.stringify(peerGroups.map(g=>g.title))===JSON.stringify(['总结与章节','视频学习清单','视频问答','校对记录','视频与句子收藏'])&&peerGroups.every(g=>parseFloat(g.border)>0&&parseFloat(g.radius)>0),peerGroups);
+  await page.cdp.evaluate(`${el('pane-video')}.querySelector('.scroll').scrollTop=0`);await shot('video-groups-normal');
+  for(const g of peerGroups.filter(g=>g.open))await click(`[...${el('pane-video')}.firstElementChild.children].find(x=>x.tagName==='DETAILS'&&x.firstElementChild.textContent===${JSON.stringify(g.title)}).firstElementChild`);
+  await page.cdp.evaluate(`${el('pane-video')}.querySelector('.scroll').scrollTop=0`);await shot('video-five-groups-collapsed');
+  for(const g of peerGroups.filter(g=>g.open))await click(`[...${el('pane-video')}.firstElementChild.children].find(x=>x.tagName==='DETAILS'&&x.firstElementChild.textContent===${JSON.stringify(g.title)}).firstElementChild`);
+  check('answers-have-no-summary-wrapper',await page.cdp.evaluate(`!${el('videoConversation')}.textContent.includes('概述与要点')`));
+  await page.cdp.send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloads});
+  const beforeExports=await activity();await click(el('notesSubtitles'));const markdown=await downloadClick('exportNotes','md');
+  check('actual-markdown-download-with-existing-results-and-subtitles',markdown.includes('## 视频学习清单')&&markdown.includes('## 视频问答')&&markdown.includes('作者的要点是什么')&&markdown.includes('## 已取得字幕')&&markdown.includes('?p=1&t=0')&&markdown.includes('完整性未核实'));
+  await sidebarCheck('normal');
+  await click(`${host}.querySelector('[data-pane=subtitles]')`);
+  for(const format of ['srt','vtt','txt']){await choose(el('subtitleFormat'),format);const text=await downloadClick('export',format);check('actual-'+format+'-subtitle-download',text.includes(fixture.englishText)&&(format!=='vtt'||text.startsWith('WEBVTT'))&&(format!=='srt'||text.includes('00:00:00,000 --> 00:00:30,000')))}
+  check('all-exports-use-existing-data-without-AI-or-ASR',sameActivity(beforeExports,await activity()));
+  await click(`${host}.querySelector('[data-pane=video]')`);
   await shot('03-video-chat');
   await click(`${host}.querySelector('[data-pane=subtitles]')`);
   await click(`${el('rows')}.querySelector('.cue-manual')`);await click(`${el('rows')}.querySelector('.cue-editor')`);
@@ -204,6 +238,7 @@ try {
   await shot('04-batch-proofreading');
   await click(`${host}.querySelector('[data-pane=video]')`);
   check('changed-material-marks-summary-stale-without-request',await page.cdp.evaluate(`!${el('summaryStale')}.hidden`));
+  const staleExportActivity=await activity(),staleMarkdown=await downloadClick('exportNotes','md');check('stale-markdown-keeps-original-evidence-and-new-subtitles-separate',staleMarkdown.includes('先前结果')&&staleMarkdown.includes(fixture.englishText.slice(0,-1))&&staleMarkdown.includes('Manual sentence must survive')&&sameActivity(staleExportActivity,await activity()));
   await click(`[...${host}.querySelectorAll('.learning-section>summary')].find(x=>x.textContent==='校对记录')`);await click(`${el('batchHistory')}.querySelector('button')`);
   await waitFor('batch undo',()=>page.cdp.evaluate(`!${el('rows')}.textContent.includes('Corrected:')`));
   check('batch-undo-keeps-manual-and-timestamps',await page.cdp.evaluate(`${el('rows')}.textContent.includes('Manual sentence must survive.')&&${el('rows')}.querySelectorAll('.cue-time')[1].textContent==='0:30'`));
@@ -244,8 +279,9 @@ try {
   await shot('toggle-01-normal-revealed');
   await shot('05-intensive-listening');
   await page.cdp.send('Runtime.evaluate',{expression:"document.querySelector('.bpx-player-container').requestFullscreen()",userGesture:true,awaitPromise:true});
-  await waitFor('full screen',()=>page.cdp.evaluate('!!document.fullscreenElement'));
-  await click(el('readPanel'));
+  await waitFor('full screen shell mounted',()=>page.cdp.evaluate(`!!document.fullscreenElement&&document.getElementById('biliscript-japanese-study').hasAttribute('data-fullscreen')&&${el('practice')}.parentElement===${el('practiceHome')}`));
+  await sleep(300);
+  await sidebarCheck('fullscreen');
   check('fullscreen-keeps-native-CC-and-study-sidebar',await page.cdp.evaluate(`!!document.getElementById('native-cc')&&!document.getElementById('biliscript-japanese-study').hidden`));
   check('fullscreen-transport-order-and-right-current-card',await page.cdp.evaluate(`JSON.stringify([...${el('prev')}.parentElement.querySelectorAll('button')].slice(0,4).map(b=>b.id))===JSON.stringify(['prev','next','pause','replay'])&&${el('practice')}.parentElement===${el('practiceHome')}&&!${el('practiceChinese')}.hidden&&${el('listenPrev')}.nextElementSibling===${el('listenReplay')}&&${el('listenReplay')}.nextElementSibling===${el('listenNext')}`));
   check('fullscreen-listening-navigation-stays-on-one-line',await page.cdp.evaluate(`new Set(['listenPrev','listenReplay','listenNext'].map(id=>${host}.getElementById(id).getBoundingClientRect().top)).size===1`));
@@ -255,6 +291,7 @@ try {
   check('fullscreen-toggles-restore-cached-displays',toggleAI===(await audit()).ai.length&&await page.cdp.evaluate(`!${el('practiceChinese')}.hidden&&getComputedStyle(${el('practiceCue')}).visibility==='visible'`));
   await click(`${host}.querySelector('[data-pane=subtitles]')`);await waitFor('fullscreen original recorder layout',()=>page.cdp.evaluate(`${el('practice')}.parentElement===${el('learningControls')}`));
   check('fullscreen-outside-practice-keeps-original-recorder-position',await page.cdp.evaluate(`${el('practice')}.parentElement===${el('learningControls')}`));
+  await click(`${host}.querySelector('[data-pane=video]')`);await page.cdp.evaluate(`${el('pane-video')}.querySelector('.scroll').scrollTop=0`);await shot('video-groups-fullscreen');
   await click(`${host}.querySelector('[data-pane=practice]')`);
   await shot('06-fullscreen-learning');await page.cdp.evaluate('document.exitFullscreen()');await sleep(350);
   await click(el('listenReplay'));await page.cdp.evaluate('document.querySelector("video").playbackRate=16');

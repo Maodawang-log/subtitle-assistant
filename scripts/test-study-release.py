@@ -8,7 +8,7 @@ def digest(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def snapshot(p): return {f.relative_to(p).as_posix(): digest(f) for f in p.rglob('*') if f.is_file()}
 
 def main():
-    parser=argparse.ArgumentParser(); parser.add_argument('--package', type=Path)
+    parser=argparse.ArgumentParser(); parser.add_argument('--package', type=Path); parser.add_argument('--from-version', default='2.6.5.2'); parser.add_argument('--source-extension', type=Path)
     args=parser.parse_args()
     version=json.loads((ROOT/'package.json').read_text('utf-8-sig'))['version']
     package=(args.package or ROOT/'release'/f'subtitle-assistant-{version}').resolve()
@@ -24,12 +24,16 @@ def main():
             raise AssertionError(f'Unexpected updater exit {cp.returncode}: '+cp.stdout.decode('utf-8','replace')+cp.stderr.decode('utf-8','replace'))
         return cp
     def update(*extra,ok=True): return run('-ExistingDirectory',target,'-PackageDirectory',package,'-BackupDirectory',backups,*extra,ok=ok)
-    shutil.copytree(package/'extension',target)
-    m=json.loads((target/'manifest.json').read_text('utf-8')); m['version']='2.6.5.2'
-    (target/'manifest.json').write_text(json.dumps(m,ensure_ascii=False),encoding='utf-8')
-    (target/'entry/study.js').write_text('// original fixture\n',encoding='utf-8')
+    shutil.copytree(args.source_extension or package/'extension',target)
+    m=json.loads((target/'manifest.json').read_text('utf-8'))
+    if args.source_extension:
+        assert m['version']==args.from_version
+    else:
+        m['version']=args.from_version
+        (target/'manifest.json').write_text(json.dumps(m,ensure_ascii=False),encoding='utf-8')
+        (target/'entry/study.js').write_text('// original fixture\n',encoding='utf-8')
     (target/'retained-user-file.txt').write_text('Keep this unrelated file',encoding='utf-8')
-    (target/'NOTICE.md').unlink()
+    (target/'NOTICE.md').unlink(missing_ok=True)
     before=snapshot(target)
     try:
         update('-WhatIf'); check('preview leaves exact target bytes and creates no backup',snapshot(target)==before and not backups.exists())
@@ -48,7 +52,7 @@ def main():
         shutil.copy2(backup/'files/entry/study.js',target/'entry/study.js')
         m['version']='9.0.0'; (target/'manifest.json').write_text(json.dumps(m),encoding='utf-8'); changed=snapshot(target)
         update(ok=False); check('newer target rejected without mutation',snapshot(target)==changed)
-        m['version']='2.6.5.2';m['key']='fixture-identity';(target/'manifest.json').write_text(json.dumps(m),encoding='utf-8');changed=snapshot(target)
+        m['version']=args.from_version;m['key']='fixture-identity';(target/'manifest.json').write_text(json.dumps(m),encoding='utf-8');changed=snapshot(target)
         update(ok=False);check('identity key mismatch rejected',snapshot(target)==changed)
         m.pop('key');(target/'manifest.json').write_text(json.dumps(m),encoding='utf-8')
         broken=area/'corrupt-package';shutil.copytree(package,broken);(broken/'extension/entry/study.js').write_text('// corrupt',encoding='utf-8')
@@ -64,8 +68,8 @@ def main():
             subprocess.run(['powershell.exe','-NoProfile','-Command',"[IO.Directory]::Delete('"+str(link).replace("'","''")+"')"],check=True,capture_output=True)
         check('package unchanged by all updater checks',all(digest(package/'extension'/name)==sha for name,sha in descriptor['files'].items()))
     finally:
-        report=dict(success=all(c['ok'] for c in checks),checks=checks,fixture=str(area),package=str(package),realInstallationModified=False)
-        (work/'result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+        report=dict(fromVersion=args.from_version,sourceExtension=str(args.source_extension) if args.source_extension else None,success=all(c['ok'] for c in checks),checks=checks,fixture=str(area),package=str(package),realInstallationModified=False)
+        (work/f'result-{args.from_version}.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(report,ensure_ascii=False))
 
 if __name__=='__main__':

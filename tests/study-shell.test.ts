@@ -14,6 +14,26 @@ it("never injects an entry into native controls and preserves native CC through 
  cc.click();expect(clicked).toHaveBeenCalledOnce();expect(shell.$('enable')).not.toBeNull();
 });
 afterEach(()=>{shell?.destroy();document.body.replaceChildren();delete (document as any).fullscreenElement;vi.unstubAllGlobals();vi.restoreAllMocks()});
+it('toggles only panel visibility and keeps the selected pane, content and scroll in normal and fullscreen modes',()=>{
+ vi.stubGlobal('chrome',{runtime:{getURL:(p:string)=>p}});
+ document.body.innerHTML='<main class="left-container"><div id="playerWrap"><div class="bpx-player-container"><video></video></div></div></main>';
+ const video=document.querySelector('video')!,full=document.querySelector('.bpx-player-container')!;
+ let fullscreen:Element|null=null;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>fullscreen});
+ shell=createStudyShell();shell.setEnabled(true);shell.setPane('video');shell.mount(video);
+ const pane=shell.$('pane-video')!,scroll=pane.querySelector('.scroll')! as HTMLElement,original=pane.innerHTML;
+ scroll.scrollTop=123;const paneChange=vi.fn();shell.host.addEventListener('study-pane',paneChange);
+ const toggle=shell.$('readPanel')!;
+ for(const inFull of [false,true]){
+  fullscreen=inFull?full:null;shell.mount(video);
+  expect(toggle.textContent).toBe('收起侧边栏');expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  toggle.click();shell.mount(video);expect(shell.host.hidden).toBe(true);expect(toggle.textContent).toBe('展开侧边栏');expect(toggle.title).toBe('展开侧边栏');
+  expect(shell.controls.hidden).toBe(false);expect(shell.controls.hasAttribute('data-enabled')).toBe(true);
+  // Chromium can clear a hidden fullscreen scroller's position.
+  scroll.scrollTop=0;
+  toggle.click();shell.mount(video);expect(shell.host.hidden).toBe(false);expect(shell.pane).toBe('video');expect(scroll.scrollTop).toBe(123);expect(pane.innerHTML).toBe(original);
+ }
+ expect(paneChange).not.toHaveBeenCalled();shell.$('fold')!.click();expect(toggle.getAttribute('aria-label')).toBe('展开侧边栏');
+});
 it("does not insert study hosts or alter sidebar styles before server DOM hydration finishes",()=>{
  vi.stubGlobal("chrome",{runtime:{getURL:(p:string)=>p}});
  document.body.innerHTML='<div id="app" data-server-rendered="true"><main class="left-container"><div id="playerWrap"><video></video></div><div id="native-actions">native actions</div></main><aside class="right-container"><div>native recommendations</div></aside></div>';

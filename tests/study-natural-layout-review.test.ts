@@ -6,7 +6,7 @@ import { createInlineRecorder } from "../extension/study/inline-recorder.js";
 let shell: ReturnType<typeof createStudyShell> | undefined;
 let recording: ReturnType<typeof createInlineRecorder> | undefined;
 let fullscreen: Element | null = null;
-const labels: Record<string, string> = { prev: "上句", pause: "暂停", replay: "重播", next: "下句", loop: "循环：关", translate: "双语字幕：关", explain: "本句讲解", paragraph: "邻近几句", readPanel: "字幕 / 讲解" };
+const labels: Record<string, string> = { prev: "上句", pause: "暂停", replay: "重播", next: "下句", loop: "循环：关", translate: "双语字幕：关", explain: "本句讲解", paragraph: "邻近几句", readPanel: "侧边栏" };
 const element = <T extends HTMLElement = HTMLElement>(id: string) => shell!.$(id)! as T;
 async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
 

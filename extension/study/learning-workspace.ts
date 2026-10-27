@@ -4,11 +4,13 @@ import { cueFingerprint, materialFingerprint, materialCoverage, evidenceCues, sp
 import { boundedHistory, scopeStillCurrent } from './learning-guards.js';
 import { createLearningFavorites } from './learning-favorites.js';
 import { createListening } from './listening.js';
+import { learningView, snapshotStale } from './learning-view.js';
+import { exportLearningNotes } from './learning-export.js';
 
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
 const button=(text,fn,cls='')=>{const b=node('button',text,cls);b.onclick=()=>Promise.resolve().then(fn).catch(e=>{if(e.name!=='AbortError')b.dispatchEvent(new CustomEvent('learning-error',{bubbles:true,detail:e.message}))});return b};
 export function createLearningWorkspace(ui,adapter){
- const {$}=ui;let epoch=0,job=null,record={conversation:[]},pinned=false,loadedKey='',saveTimer=0,restoring=false;
+ const {$}=ui;let epoch=0,job=null,record={conversation:[]},pinned=false,loadedKey='',saveTimer=0,restoring=false,loading=null;
  const listening=createListening(ui,adapter);
  const status=(text)=>{$('learningStatus').textContent=text};
  ui.shadow.addEventListener('learning-error',e=>status(e.detail));
@@ -25,7 +27,7 @@ export function createLearningWorkspace(ui,adapter){
   if(job){if(job.phase==='committing')reason='校对已进入统一保存阶段；完成后可在校对记录整批撤销。';job=null;epoch++;void chrome.runtime.sendMessage({type:'study-learning-stop'});adapter.cancelCollection();status(reason)}renderBusy();
  }
  function renderBusy(){const busy=!!job;for(const b of ui.shadow.querySelectorAll('.cue-manual,.cue-proofread'))b.disabled=job?.phase==='committing';$('learningStop').hidden=!busy;$('batchStop').hidden=!busy;$('learningStop').disabled=job?.phase==='committing';$('batchStop').disabled=job?.phase==='committing';for(const id of ['summaryGenerate','collectFull','chatSend','batchAll'])$(id).disabled=busy;}
- async function begin(label,fn){if(job)return;const token={epoch:++epoch,binding:adapter.binding()};job=token;renderBusy();status(label);try{await fn(token)}catch(e){if(valid(token))status(e.name==='AbortError'?'已停止。':e.message)}finally{if(job===token){job=null;renderBusy()}}}
+ async function begin(label,fn){if(job)return;const token={epoch:++epoch,binding:adapter.binding()};job=token;renderBusy();status(label);try{await load();checked(token);await fn(token)}catch(e){if(valid(token))status(e.name==='AbortError'?'已停止。':e.message)}finally{if(job===token){job=null;renderBusy()}}}
  const checked=token=>{if(!valid(token))throw new DOMException('资料已更新，任务已停止','AbortError')};
  async function request(kind,evidence,m,token,extra={}){checked(token);const r=await chrome.runtime.sendMessage({type:'study-learning-ai',kind,evidence,language:m.language,resource:m.key+'|'+m.identity,revision:await digest(materialFingerprint(m)),coverage:materialCoverage(m).text,requestId:crypto.randomUUID(),...extra});checked(token);if(!r?.ok)throw new Error(r?.error||'文字任务未完成');return r}
  function cite(c,m){
@@ -35,24 +37,45 @@ export function createLearningWorkspace(ui,adapter){
  async function saveSentence(c,m=material()){
   await favorites.toggle(c,m);
  }
- function renderResult(target,result,m,evidence){
-  target.replaceChildren();if(!result?.supported){target.append(node('p','现有字幕未提供足够依据，无法回答。'));return}
-  const map=new Map(evidence.map(c=>[c.id,c]));
-  for(const [label,items] of [['概述与要点',result.blocks],['章节跳转',result.chapters],['视频学习清单',result.learning]]){
-   if(!items?.length)continue;const section=node('section',undefined,'learning-section');section.append(node('h3',label));
-   for(const block of items){const card=node('article',undefined,'grounded-card');card.append(node('p',block.text));const refs=block.refs.map(id=>map.get(id)).filter(Boolean);
-    if(label==='章节跳转'&&refs[0])card.prepend(button(timeLabel(refs[0].start+m.offset)+' 播放',()=>adapter.jump(refs[0].start+m.offset,refs[0].end+m.offset)));
-    const details=node('details'),summary=node('summary','原句与出处');details.append(summary);for(const c of refs)details.append(cite(c,m));card.append(details);
-    if(label==='视频学习清单'&&refs[0]){card.append(favorites.sentenceButton(refs[0],m,false,'收藏例句'));card.append(button('查看词语',()=>adapter.words(refs[0])))}section.append(card);
-   }target.append(section);
-  }
+ function renderBlock(block,m,{chapter=false,learning=false}={}){
+  const card=node('article',undefined,chapter?'grounded-card chapter-card':'grounded-card');
+  if(chapter){const heading=node('div',undefined,'chapter-heading');heading.append(button(timeLabel(block.cues[0].start+(m.offset||0))+' 播放',()=>adapter.jump(block.cues[0].start+(m.offset||0),block.cues[0].end+(m.offset||0))),node('h3',block.title));card.append(heading)}
+  card.append(node('p',block.text));
+  const details=node('details');details.append(node('summary','原句与出处'));for(const c of block.cues)details.append(cite(c,m));card.append(details);
+  if(learning&&block.cues[0])card.append(favorites.sentenceButton(block.cues[0],m,false,'收藏例句'),button('查看词语',()=>adapter.words(block.cues[0])));
+  return card;
+ }
+ function updateStale(fingerprint){
+  const old=record.summary&&snapshotStale(record.summary,fingerprint,adapter.configuration());
+  $('summaryStale').hidden=!old;$('learningStale').hidden=!old;
+  [...$('videoConversation').querySelectorAll('.chat-stale')].forEach((el,i)=>{el.hidden=!snapshotStale(record.conversation[i],fingerprint,adapter.configuration())});
  }
  async function renderRecord(){
   const m=material();if(!m)return;const owner=adapter.binding(),fingerprint=record.summary||record.conversation?.length?await digest(materialFingerprint(m)):"";if(owner!==adapter.binding())return;
-  $('summaryStale').hidden=!record.summary||record.summary.fingerprint===fingerprint&&record.summary.configuration===adapter.configuration();
-  if(record.summary)renderResult($('videoSummary'),record.summary.result,record.summary.material,record.summary.evidence);else $('videoSummary').replaceChildren(node('p','点击“总结已取得字幕”生成概述、要点和章节。','empty'));
+  const summary=$('videoSummary'),learning=$('videoLearning');summary.replaceChildren();learning.replaceChildren();
+  if(record.summary?.material){
+   const snapshot=record.summary,view=learningView(snapshot);
+   const extra=node('details',undefined,'overview-extra');extra.append(node('summary','展开其余概述'));
+   view.overview.forEach((block,i)=>(i<2?summary:extra).append(renderBlock(block,snapshot.material)));
+   if(view.overview.length>2)summary.append(extra);
+   for(const chapter of view.chapters)summary.append(renderBlock(chapter,snapshot.material,{chapter:true}));
+   for(const block of view.learning)learning.append(renderBlock(block,snapshot.material,{learning:true}));
+   if(!summary.childNodes.length)summary.append(node('p','现有字幕未提供足够依据生成总结。','empty'));
+   if(!view.learning.length)learning.append(node('p','这份总结没有学习清单。','empty'));
+  }else{
+   summary.append(node('p','取得字幕后，点击“总结已取得字幕”。','empty'));
+   learning.append(node('p','生成总结后，这里显示可学习的表达与语法。','empty'));
+  }
   const target=$('videoConversation');target.replaceChildren();
-  for(const turn of record.conversation||[]){const item=node('article',undefined,'chat-turn');item.append(node('h3',turn.question));if(turn.fingerprint!==fingerprint)item.append(node('p','基于先前字幕；当前资料已更新。','hint'));renderResult(item.appendChild(node('div')),turn.result,turn.material,turn.evidence);target.append(item)}
+  for(const turn of record.conversation||[]){
+   const item=node('article',undefined,'chat-turn');item.append(node('h3',turn.question),node('p','先前结果：字幕或接口已更新；出处保留生成时的原句。','notice chat-stale'));
+   const view=learningView(turn);
+   if(!view.supported)item.append(node('p','现有字幕未提供足够依据，无法回答。'));
+   else for(const block of view.blocks)item.append(renderBlock(block,turn.material));
+   target.append(item);
+  }
+  if(!target.childNodes.length)target.append(node('p','输入问题，依据已取得字幕提问。','empty'));
+  updateStale(fingerprint);
  }
  async function saveRecord(){const m=material();if(m)await learningAction('record',{key:m.key,record})}
  async function analyze(m,token,question=''){
@@ -72,7 +95,7 @@ export function createLearningWorkspace(ui,adapter){
   }
   const result=supported.length?{...supported[0],chapters:question?[]:supported[0].chapters.slice(0,6),learning:question?[]:supported[0].learning.slice(0,5)}:{supported:false,blocks:[],chapters:[],learning:[]};
   const cited=new Set([...result.blocks,...result.chapters,...result.learning].flatMap(b=>b.refs));
-  return {result,evidence:evidence.filter(c=>cited.has(c.id)),material:{...m,cues:[]},model,provider,fingerprint:await digest(materialFingerprint(m)),configuration:adapter.configuration(),at:Date.now()};
+  return {result,evidence:evidence.filter(c=>cited.has(c.id)),material:{...m,cueCount:m.cues.length,cues:[]},model,provider,fingerprint:await digest(materialFingerprint(m)),configuration:adapter.configuration(),at:Date.now()};
  }
  $('summaryGenerate').onclick=()=>begin('准备总结…',async token=>{const m=capture();const result=await analyze(m,token);checked(token);record.summary=result;await renderRecord();await saveRecord();checked(token);status('总结完成。点击出处可回听原句。')});
  $('collectFull').onclick=()=>begin('正在收集全片字幕…',async token=>{await adapter.collectFull();checked(token);const m=capture();status(materialCoverage(m).text);const result=await analyze(m,token);checked(token);record.summary=result;await renderRecord();await saveRecord();status('收集与总结完成。需要长期保留时收藏视频。')});
@@ -90,9 +113,25 @@ export function createLearningWorkspace(ui,adapter){
  };
  const renderLibrary=()=>favorites.refresh();
  $('refreshSaved').onclick=()=>renderLibrary().catch(e=>status(e.message));
- function refresh(){const m=material();$('materialRange').textContent=m?.cues.length?materialCoverage(m).text:'尚未取得字幕';$('bookmarkVideo').textContent=pinned?'已收藏':'收藏视频';$('bookmarkVideo').setAttribute('aria-pressed',String(pinned));$('bookmarkVideo').title=pinned?'取消收藏，字幕和学习记录转为临时缓存':'收藏视频并长期保留已取得的字幕和学习记录';$('materialStorage').textContent=pinned?'已收藏 · 字幕和学习记录长期保留':'未收藏 · 使用临时缓存';$('collectFull').hidden=!!(m&&materialCoverage(m).complete);$('batchScope').textContent=m?.cues.length?`全部校对仅处理当前 ${m.cues.length} 句，保留已修改句；完成后统一采用，可整批撤销。`:'';if(record.summary){const stamp=materialFingerprint(m);void digest(stamp).then(hash=>{if(record.summary&&material()&&materialFingerprint(material())===stamp)$('summaryStale').hidden=record.summary.fingerprint===hash&&record.summary.configuration===adapter.configuration()})}}
- async function load(){const m=material();if(!m||loadedKey===m.key)return;const key=m.key,b=adapter.binding();loadedKey=key;record={conversation:[]};pinned=false;const data=await learningAction('get',{key});if(b!==adapter.binding()||key!==material()?.key)return;record=data.record||{conversation:[]};pinned=data.pinned;refresh();await renderRecord();void renderLibrary().catch(e=>status(e.message));await renderBatches(data.batches)}
- async function renderBatches(batches){const target=$('batchHistory');target.replaceChildren();for(const batch of (batches||[]).filter(b=>!b.undone).reverse()){const row=node('div',undefined,'batch-history');row.append(node('span',`${new Date(batch.at).toLocaleString()} · ${batch.changes.length} 句`));row.append(button('撤销这批',async()=>{cancel();await adapter.undoBatch(batch);await loadBatches();changed();status('已撤销仍与这批结果一致的修改；之后的人工修改保留。')}));target.append(row)}}
+ function refresh(){const m=material();$('materialRange').textContent=m?.cues.length?materialCoverage(m).text:'尚未取得字幕';$('bookmarkVideo').textContent=pinned?'已收藏':'收藏视频';$('bookmarkVideo').setAttribute('aria-pressed',String(pinned));$('bookmarkVideo').title=pinned?'取消收藏，字幕和学习记录转为临时缓存':'收藏视频并长期保留已取得的字幕和学习记录';$('materialStorage').textContent=pinned?'已收藏 · 字幕和学习记录长期保留':'未收藏 · 使用临时缓存';$('collectFull').hidden=!!(m&&materialCoverage(m).complete);$('batchScope').textContent=m?.cues.length?`全部校对仅处理当前 ${m.cues.length} 句，保留已修改句；完成后统一采用，可整批撤销。`:'';if(m&&(record.summary||record.conversation?.length)){const stamp=materialFingerprint(m);void digest(stamp).then(hash=>{if(material()&&materialFingerprint(material())===stamp)updateStale(hash)})}}
+ async function load(){
+  const m=material();if(!m)return;if(loadedKey===m.key)return loading;
+  const key=m.key,b=adapter.binding();loadedKey=key;record={conversation:[]};pinned=false;
+  const pending=(async()=>{const data=await learningAction('get',{key});if(b!==adapter.binding()||key!==material()?.key)return;record=data.record||{conversation:[]};pinned=data.pinned;refresh();await renderRecord();if(b!==adapter.binding())return;void renderLibrary().catch(e=>status(e.message));await renderBatches(data.batches)})();
+  loading=pending;try{await pending}catch(e){if(loadedKey===key)loadedKey='';throw e}finally{if(loading===pending)loading=null}
+ }
+ $('exportNotes').onclick=async()=>{
+  const control=$('exportNotes'),owner=adapter.binding();control.disabled=true;
+  try{
+   await load();if(owner!==adapter.binding())return;
+   const m=structuredClone(material());if(!m)throw new Error('请先打开一个视频');
+   const saved=structuredClone(record),chinese=Object.fromEntries(m.cues.map(c=>[c.id,adapter.availableChinese?.(c)||''])),configuration=adapter.configuration();
+   const fingerprint=await digest(materialFingerprint(m));if(owner!==adapter.binding())return;
+   const file=exportLearningNotes(m,saved,{fingerprint,configuration,includeSubtitles:$('notesSubtitles').checked,chinese});
+   adapter.download(file.name,file.text,file.type);status('已导出学习笔记。');
+  }catch(e){if(owner===adapter.binding())status(e.message)}finally{control.disabled=false}
+ };
+ async function renderBatches(batches){const target=$('batchHistory');target.replaceChildren();for(const batch of (batches||[]).filter(b=>!b.undone).reverse()){const row=node('div',undefined,'batch-history');row.append(node('span',`${new Date(batch.at).toLocaleString()} · ${batch.changes.length} 句`));row.append(button('撤销这批',async()=>{cancel();await adapter.undoBatch(batch);await loadBatches();changed();status('已撤销仍与这批结果一致的修改；之后的人工修改保留。')}));target.append(row)}if(!target.childNodes.length)target.append(node('p','暂无批量校对记录。','empty'))}
  async function loadBatches(){const m=material();if(m){const data=await learningAction('get',{key:m.key});await renderBatches(data.batches)}}
  $('batchAll').onclick=()=>begin('准备全部校对…',async token=>{
   const m=capture();if(adapter.manualEditing())throw new Error('请先保存或取消正在编辑的句子');
@@ -116,7 +155,7 @@ export function createLearningWorkspace(ui,adapter){
   hideOriginal:listening.hideOriginal,hideChinese:listening.hideChinese,
   get busy(){return !!job},
   async restore(key){restoring=true;try{return await learningAction('get',{key})}finally{restoring=false}},
-  reset(){cancel();clearTimeout(saveTimer);loadedKey='';record={conversation:[]};pinned=false;listening.reset();$('videoSummary').replaceChildren();$('videoConversation').replaceChildren();$('batchHistory').replaceChildren();refresh()},
+  reset(){cancel();clearTimeout(saveTimer);loadedKey='';record={conversation:[]};pinned=false;listening.reset();$('videoSummary').replaceChildren();$('videoLearning').replaceChildren();$('videoConversation').replaceChildren();$('batchHistory').replaceChildren();refresh()},
   manualStarted(){cancel('已开始人工编辑，批量任务停止。')},
   configurationChanged(){listening.configurationChanged();cancel('文字接口已更改，旧结果保留并标记过期。');refresh()}
  };

@@ -4,6 +4,7 @@ import { normalizeSourceLanguage, sourceLanguageName, isSourceTrack, tokenizeEng
 import { getJapaneseCc } from "./cc-source.js";
 import { createBoundedAsrController, requestStudyAudioWindow } from "./bounded-asr.js";
 import { getNativeStudySource, sameNativeBinding } from "./native-source.js";
+import { exportSubtitles } from './learning-export.js';
 import { createLearningWorkspace } from "./learning-workspace.js";
 import { learningAction } from "./learning-store.js";
 import { materialKey, materialCoverage, mergeRanges } from "./learning-data.js";
@@ -398,7 +399,7 @@ import { renderMarkdown } from "../ui/markdown.js";
   if(!enabled||mine!==generation)return;
   updateTrackChoices();$("source").textContent="手动导入："+f.name;display(0,true);status("已导入"+languageName()+"时间轴字幕；可在视频面板长期保存。");$("subtitleFile").value="";workspace?.changed();void workspace?.load().catch(e=>status(e.message,true));
  });
- $("export").onclick=()=>safe(async()=>{guard();download(route.replace(":","-")+".txt",cues.map(c=>fmt(c.start)+" "+c.text+"\n"+chineseFor(c)).join("\n\n"))});
+ $("export").onclick=()=>safe(async()=>{guard();const m=getMaterial(),file=exportSubtitles(m,$("subtitleFormat").value,Object.fromEntries(m.cues.map(c=>[c.id,availableChinese(c)])));download(file.name,file.text,file.type)});
 
  chrome.runtime.onMessage.addListener((m,s,reply)=>{
   if(m?.type==="study-toggle"){openPanel();reply({ok:true});return false;}
@@ -424,7 +425,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  function restoreMaterial(m){restoredMaterial=m;materialSource=m.source;identity=m.identity;clip={bvid:m.bvid,cid:m.cid,title:m.title};offset=m.offset||0;$("offset").value=offset;recognizedWindows=m.source==="asr"?m.ranges:[];const raw=m.cues.map(c=>({...c,text:c.originalText||c.text}));if(m.source==="asr"){timeline.clear();timeline.setCorrections(corrections[identity]||[]);for(const r of m.ranges)for(let start=r.start;start<r.end;start+=30){const duration=Math.min(30,r.end-start);cues=timeline.replaceWindow(raw.filter(c=>c.end>start&&c.start<start+duration),{windowStart:start,duration,resourceId:identity,language:sourceLanguage,model:settings.asrModel||"small"})}}else cues=loadCorrected(raw,identity+"|"+sourceLanguage);$("source").textContent="恢复资料 · "+m.title;updateAtTime(true);workspace.refresh()}
  async function applyStoredCorrections(items){corrections={...corrections,[identity]:items};timeline.setCorrections(items);cues=timeline.reapplyCorrections();for(const c of cues)if(c.edited)invalidChinese.add(c.id);invalidateCueWork();display(selected,true);updateAtTime(true);workspace.changed({batchOwn:true})}
  workspace=createLearningWorkspace(ui,{
-  material:getMaterial,meta:videoMeta,current:()=>cues[selected],binding,configuration:()=>JSON.stringify([settings.baseUrl,settings.model,settings.compatibility]),manualEditing:()=>!!manualDraft,
+  material:getMaterial,meta:videoMeta,download,current:()=>cues[selected],binding,configuration:()=>JSON.stringify([settings.baseUrl,settings.model,settings.compatibility]),manualEditing:()=>!!manualDraft,
   correctionSnapshot:async()=>{const data=await chrome.storage.local.get(correctionStorageKey(route,sourceLanguage));return data[correctionStorageKey(route,sourceLanguage)]?.[identity]||[]},
   async commitBatch(batch){const owner=binding(),storageKey=correctionStorageKey(route,sourceLanguage),resource=identity,key=materialKey(route,sourceLanguage);batchApplying=true;try{const r=await learningAction("batchCommit",{...batch,storageKey,resource,key});if(owner===binding())await applyStoredCorrections(r.corrections)}finally{batchApplying=false}},
   async undoBatch(batch){const owner=binding(),storageKey=correctionStorageKey(route,sourceLanguage),resource=identity,key=materialKey(route,sourceLanguage);const data=await chrome.storage.local.get(storageKey);batchApplying=true;try{const r=await learningAction("batchUndo",{id:batch.id,key,storageKey,resource,expected:data[storageKey]?.[resource]||[]});if(owner===binding())await applyStoredCorrections(r.corrections)}finally{batchApplying=false}},

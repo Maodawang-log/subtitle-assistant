@@ -5,6 +5,7 @@ import {createStudyShell} from '../extension/study/ui-shell.js';
 import {createLearningWorkspace} from '../extension/study/learning-workspace.js';
 import {createMemoryStorageArea} from './helpers/memory-storage-area.js';
 import {materialKey} from '../extension/study/learning-data.js';
+import {learningAction} from '../extension/study/learning-store.js';
 const deferred=<T>()=>{let resolve!:(v:T)=>void;return {promise:new Promise<T>(done=>resolve=done),resolve}};
 let ui:any,workspace:any,m:any,adapter:any,disk:Map<string,any>,reply:(request:any)=>Promise<any>,send:any,binding:string;
 const flush=async()=>{for(let n=0;n<100;n++)await Promise.resolve()};
@@ -18,6 +19,20 @@ beforeEach(()=>{
  workspace=createLearningWorkspace(ui,adapter);ui.setEnabled(true);ui.setPane('video');
 });
 afterEach(async()=>{workspace.reset();await flush();ui.destroy();vi.unstubAllGlobals();vi.restoreAllMocks()});
+it('loads old results into five peer groups and exports stored answers without invoking AI or collecting audio',async()=>{
+ const saved={...result([{id:'s1'}]),evidence:[{id:'s1',start:1,end:3,text:'old source'}],material:{...m,cues:[]},fingerprint:'old',configuration:'old',at:1};
+ const summary={...saved,result:saved.data},turn={...summary,question:'Saved question'};
+ await learningAction('record',{key:m.key,record:{summary,conversation:[turn]}});
+ adapter.download=vi.fn();adapter.availableChinese=()=> '已有中文';
+ const loading=workspace.load();ui.$('notesSubtitles').checked=true;ui.$('exportNotes').click();await loading;
+ await vi.waitFor(()=>expect(adapter.download).toHaveBeenCalledOnce());
+ expect([...ui.$('pane-video').firstElementChild.children].filter((s:any)=>s.tagName==='DETAILS').map((s:any)=>s.firstElementChild.textContent)).toEqual(['总结与章节','视频学习清单','视频问答','校对记录','视频与句子收藏']);
+ expect(ui.$('videoSummary').textContent).not.toContain('expression');expect(ui.$('videoLearning').textContent).toContain('expression');
+ expect(ui.$('videoConversation').textContent).toContain('Saved question');expect(ui.$('videoConversation').textContent).not.toContain('概述与要点');
+ expect(ui.$('summaryStale').hidden).toBe(false);expect(ui.$('learningStale').hidden).toBe(false);
+ const [name,text]=adapter.download.mock.calls[0];expect(name).toMatch(/\.md$/);expect(text).toContain('先前结果');expect(text).toContain('Saved question');expect(text).toContain('old source');expect(text).toContain('已有中文');
+ expect(send.mock.calls.filter(([r]:any)=>r.type==='study-learning-ai')).toHaveLength(0);expect(adapter.collectFull).not.toHaveBeenCalled();
+});
 it('continues summary of the clicked snapshot when later non-overlapping subtitles arrive',async()=>{
  const hold=deferred<any>();reply=()=>hold.promise;ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(true));
  m.cues.push({...m.cues[0],id:'next',start:31,end:33});workspace.changed();expect(workspace.busy).toBe(true);hold.resolve(result([{id:'s1'}]));await vi.waitFor(()=>expect(ui.$('videoSummary').textContent).toContain('summary'));await vi.waitFor(()=>expect(workspace.busy).toBe(false));expect(ui.$('summaryStale').hidden).toBe(false);

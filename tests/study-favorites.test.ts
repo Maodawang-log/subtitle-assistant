@@ -49,8 +49,8 @@ it('reconstructs stars after row rebuild, reopening and clearing temporary cache
 it('uses the same old sentence id in stars, summary citations and learning examples, and synchronizes list removal',async()=>{
  const old=sentenceBookmark(m.cues[0],m);expect(old.id).toBe(JSON.stringify(['sentence',m.key,m.identity,53,55,'A sentence.']));
  const b=star();b.click();await vi.waitFor(()=>expect(b.textContent).toBe('★'));
- ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(ui.$('videoSummary').querySelectorAll('.save-sentence')).toHaveLength(3));
- const controls=Array.from(ui.$('videoSummary').querySelectorAll('.save-sentence')) as HTMLButtonElement[];
+ ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence,#videoLearning .save-sentence')).toHaveLength(3));
+ const controls=Array.from(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence,#videoLearning .save-sentence')) as HTMLButtonElement[];
  expect(controls.every(c=>c.textContent==='已收藏')).toBe(true);expect(saved()).toHaveLength(1);
  controls[2].click();await vi.waitFor(()=>expect(b.textContent).toBe('☆'));expect(controls.every(c=>c.getAttribute('aria-pressed')==='false')).toBe(true);
  controls[0].click();await vi.waitFor(()=>expect(b.textContent).toBe('★'));expect(saved()).toHaveLength(1);

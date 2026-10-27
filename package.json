@@ -1,6 +1,6 @@
 {
   "name": "subtitle-assistant",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "B 站日语与英语字幕学习助手：本地识别、查词、校对、精听和复习",
   "devEngines": {
     "packageManager": {
