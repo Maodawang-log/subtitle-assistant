@@ -1,6 +1,6 @@
 import {expect,it} from 'vitest';
 import {overallBasis,materialCoverage,type VideoMaterial} from '../extension/study/learning-data.js';
-import {overallSourcePlan,overallScope,summaryScopeLabel} from '../extension/study/overall-summary.js';
+import {overallSourcePlan,overallScope,summaryScopeLabel,summaryScopeText} from '../extension/study/overall-summary.js';
 import {exportLearningNotes} from '../extension/study/learning-export.js';
 
 const m:VideoMaterial={version:1,key:'key',route:'BV1ab411c7mD:p2',identity:'BV1ab411c7mD:2',bvid:'BV1ab411c7mD',cid:'2',page:2,language:'en',title:'source',duration:120,durationVerified:true,offset:0,source:'cc',ranges:[{start:4,end:7},{start:20,end:23}],cues:[{id:'c',revision:1,start:4,end:7,text:'real words'}],at:1};
@@ -35,6 +35,13 @@ it('labels old full-looking snapshots as historical unless the overall process m
  expect(summaryScopeLabel({material:full})).toContain('历史／局部');
  expect(summaryScopeLabel({material:full,overall:overallScope(full)})).toContain('整体总结');
  expect(summaryScopeLabel({material:m,overall:overallScope(full)})).toContain('历史／局部');
+});
+it('shows the source once in the summary scope line, followed by its actual coverage',()=>{
+ const cc={...m,wholeSource:proof},audio={...m,source:'asr' as const,ranges:[{start:0,end:120}]};
+ const ccText=summaryScopeText({material:cc,overall:overallScope(cc)}),audioText=summaryScopeText({material:audio,overall:overallScope(audio)});
+ expect(ccText.match(/整轨 CC/g)).toHaveLength(1);expect(ccText).toContain('0:04–0:07、0:20–0:23');
+ expect(audioText.match(/已处理全片音频/g)).toHaveLength(1);expect(audioText).toContain('0:00–2:00');
+ expect(summaryScopeText({material:audio})).toContain('历史／局部总结');
 });
 it('omits old learning by default without mutating it, and exports the actual historical or overall basis',()=>{
  const old={result:{supported:true,blocks:[{text:'overview',refs:['s1']}],chapters:[],learning:[{text:'legacy learning',refs:['s1']}]},material:{...m,cues:[],cueCount:1},evidence:[{id:'s1',start:4,end:7,text:'old evidence'}],fingerprint:'old',configuration:'old'};

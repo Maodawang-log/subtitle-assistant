@@ -166,6 +166,7 @@ async function navigateVideo(video) {
 }
 
 try {
+ scenario: {
   check('fixture-contract', fixture.videos.length === 2 && fixture.englishWords.join('').replaceAll("'", '').length > 20 && fixture.videos.every(v => /^BV[\da-zA-Z]{10}$/.test(v.bvid) && /^\d+$/.test(v.cid)));
   browser = await launchBrowser({ distDir, profilePrefix: 'study-learning-', muted: true, sync: false }); page = await attachPage(browser); cdps.push(page.cdp);
   page.cdp.on('Runtime.exceptionThrown', event => evidence.exceptions.push(event.exceptionDetails.exception?.description || event.exceptionDetails.text));
@@ -224,6 +225,20 @@ try {
   check('overall-summary-chapters-grounded-without-learning',await page.cdp.evaluate(`!${el('videoSummary')}.textContent.includes('视频学习清单')&&${el('videoSummary')}.querySelectorAll('.evidence-line').length===2&&!${el('videoLearning')}&&${el('summaryScope')}.textContent.includes('整体总结')&&${el('videoSummary')}.querySelector('.chapter-card h3').textContent==='章节 1'`));
   check('whole-CC-overall-summary-does-not-start-ASR',traffic.asr.length===ccSummaryAsr&&(await audit()).ai.at(-1).input.overall.basis==='cc-track');
   check('summary-citations-share-existing-sentence-state',await page.cdp.evaluate(`[...${el('videoSummary')}.querySelectorAll('.save-sentence')].some(b=>b.getAttribute('aria-pressed')==='true')`));
+
+  if(process.argv.includes('--summary-layout-only')){
+   check('scope-line-source-is-not-repeated',await page.cdp.evaluate(`(${el('summaryScope')}.textContent.match(/整轨 CC/g)||[]).length===1&&${el('summaryScope')}.textContent.includes('0:00–1:00')`));
+   await page.cdp.evaluate(`${el('pane-video')}.querySelector('.scroll').scrollTop=0`);await shot('video-groups-normal');
+   const groups=await page.cdp.evaluate(`[...${el('pane-video')}.firstElementChild.children].filter(x=>x.tagName==='DETAILS').map(x=>({title:x.firstElementChild.textContent,open:x.open}))`);
+   for(const g of groups.filter(g=>g.open))await click(`[...${el('pane-video')}.firstElementChild.children].find(x=>x.tagName==='DETAILS'&&x.firstElementChild.textContent===${JSON.stringify(g.title)}).firstElementChild`);
+   await shot('video-four-groups-collapsed');
+   for(const g of groups.filter(g=>g.open))await click(`[...${el('pane-video')}.firstElementChild.children].find(x=>x.tagName==='DETAILS'&&x.firstElementChild.textContent===${JSON.stringify(g.title)}).firstElementChild`);
+   await page.cdp.send('Runtime.evaluate',{expression:"document.querySelector('.bpx-player-container').requestFullscreen()",userGesture:true,awaitPromise:true});
+   await waitFor('full screen layout ready',()=>page.cdp.evaluate(`!!document.fullscreenElement&&document.getElementById('biliscript-japanese-study').hasAttribute('data-fullscreen')`));await sleep(300);
+   check('fullscreen-scope-line-source-is-not-repeated',await page.cdp.evaluate(`(${el('summaryScope')}.textContent.match(/整轨 CC/g)||[]).length===1`));
+   await page.cdp.evaluate(`${el('pane-video')}.querySelector('.scroll').scrollTop=0`);await shot('video-groups-fullscreen');
+   check('layout-verification-has-no-page-errors',evidence.exceptions.length===0,evidence.exceptions);break scenario;
+  }
   await click(`${el('videoSummary')}.querySelector('summary')`);await shot('02-summary-and-evidence');
   await click(`${el('videoSummary')}.querySelector('.save-sentence')`);await waitFor('summary cancel sync',()=>page.cdp.evaluate(`${firstStar()}.textContent==='☆'`));
   await click(`${el('videoSummary')}.querySelector('.save-sentence')`);await waitFor('summary save sync',()=>page.cdp.evaluate(`${firstStar()}.textContent==='★'`));
@@ -386,5 +401,6 @@ try {
   await click("document.getElementById('clearTemporary')");await waitFor('cache cleared',()=>page.cdp.evaluate("document.getElementById('cacheFeedback').textContent.includes('已清理')"));
   check('clear-cache-preserves-long-term-bookmarks-corrections-review',protectedBefore===await worker.evaluate("(async()=>JSON.stringify((await chrome.storage.local.get('biliscriptStudyLibraryV1')).biliscriptStudyLibraryV1))()"));
   await shot('10-storage-settings');check('no-page-errors',evidence.exceptions.length===0,evidence.exceptions);check('no-native-manager-service-actions',(await audit()).nativeBlocked===0);
+ }
 } catch(error){evidence.error=error.stack||String(error);process.exitCode=1;console.error(evidence.error);try{await shot('failure')}catch{}}
 finally{evidence.passed=checks.filter(c=>c.ok).length;evidence.failed=checks.filter(c=>!c.ok);await Promise.allSettled([...pending]);await writeEvidence(out,evidence);await teardown({browser,cdps})}

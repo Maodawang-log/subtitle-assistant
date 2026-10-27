@@ -6,7 +6,7 @@ import { createLearningFavorites } from './learning-favorites.js';
 import { createListening } from './listening.js';
 import { learningView, snapshotStale } from './learning-view.js';
 import { exportLearningNotes } from './learning-export.js';
-import { overallScope, summaryScopeLabel } from './overall-summary.js';
+import { overallScope, summaryScopeLabel, summaryScopeText } from './overall-summary.js';
 
 const node=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n};
 const button=(text,fn,cls='')=>{const b=node('button',text,cls);b.onclick=()=>Promise.resolve().then(fn).catch(e=>{if(e.name!=='AbortError')b.dispatchEvent(new CustomEvent('learning-error',{bubbles:true,detail:e.message}))});return b};
@@ -59,7 +59,7 @@ export function createLearningWorkspace(ui,adapter){
  }
  async function renderRecord(){
   const m=material();if(!m)return;const owner=adapter.binding(),fingerprint=record.summary||record.conversation?.length?await digest(materialFingerprint(m)):"";if(owner!==adapter.binding())return;
-  const summary=$('videoSummary');summary.replaceChildren();$('summaryScope').textContent=record.summary?.material?summaryScopeLabel(record.summary)+' · '+materialCoverage({...record.summary.material,cues:[],}).text.replace(' · 0 句',''):'';
+  const summary=$('videoSummary');summary.replaceChildren();$('summaryScope').textContent=record.summary?.material?summaryScopeText(record.summary):'';
   if(record.summary?.material){
    const snapshot=record.summary,view=learningView(snapshot);
    const extra=node('details',undefined,'overview-extra');extra.append(node('summary','展开其余概述'));

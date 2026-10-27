@@ -1,4 +1,4 @@
-import { overallBasis, overallBasisLabel, type OverallBasis, type VideoMaterial } from './learning-data.js';
+import { overallBasis, overallBasisLabel, materialCoverage, type OverallBasis, type VideoMaterial } from './learning-data.js';
 
 export interface OverallSummaryScope { version:1; kind:'overall'; basis:OverallBasis }
 export function overallSourcePlan(m:VideoMaterial, model?:string) {
@@ -15,4 +15,9 @@ export function summaryScopeLabel(snapshot:{overall?:OverallSummaryScope;materia
  const basis=overallBasis(snapshot.material);
  if(snapshot.overall?.version===1&&snapshot.overall.kind==='overall'&&basis===snapshot.overall.basis)return `整体总结 · ${overallBasisLabel(basis)}`;
  return '历史／局部总结（未按整体总结流程验证）';
+}
+export function summaryScopeText(snapshot:{overall?:OverallSummaryScope;material:VideoMaterial}) {
+ const label=summaryScopeLabel(snapshot),coverage=materialCoverage({...snapshot.material,cues:[]}).text.replace(' · 0 句','');
+ const detail=label.startsWith('整体总结')?coverage.split(' · ').slice(1).join(' · '):coverage;
+ return [label,detail].filter(Boolean).join(' · ');
 }
