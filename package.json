@@ -1,7 +1,7 @@
 {
-  "name": "biliscript",
-  "version": "2.6.3",
-  "description": "B 站视频字幕阅读与 AI 总结浏览器扩展",
+  "name": "subtitle-assistant",
+  "version": "2.7.0",
+  "description": "B 站日语与英语字幕学习助手：本地识别、查词、校对、精听和复习",
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
@@ -13,10 +13,9 @@
     "doc": "docs"
   },
   "scripts": {
-    "build": "node scripts/build.js",
-    "dev": "node scripts/build.js --watch",
+    "build": "node scripts/build-study.cjs",
     "build:content": "node scripts/build-content.js",
-    "build:release": "python3 scripts/build_release.py || python scripts/build_release.py",
+    "build:release": "python scripts/package-study-release.py",
     "catalog:sync:upstream": "node scripts/sync-models-dev-catalog.mjs",
     "catalog:sync:thinking": "node scripts/sync-models-dev-thinking.mjs",
     "catalog:check": "node scripts/check-models-dev-catalog.mjs",
@@ -29,20 +28,26 @@
     "eval:sweep": "node_modules/.bin/esbuild eval/sweep.ts --bundle --platform=node --format=esm --outfile=eval/sweep.mjs && node eval/sweep.mjs",
     "smoke:mermaid": "node scripts/mermaid-smoke/serve.mjs",
     "harness:browser": "node scripts/browser-harness/smoke.mjs",
-    "harness:scenario": "node scripts/browser-harness/run-scenario.mjs"
+    "harness:scenario": "node scripts/browser-harness/run-scenario.mjs",
+    "build:study": "node scripts/build-study.cjs",
+    "build:upstream": "node scripts/build.js",
+    "dev:upstream": "node scripts/build.js --watch",
+    "build:release:upstream": "python3 scripts/build_release.py || python scripts/build_release.py",
+    "test:study": "vitest run tests/study",
+    "test:upgrade": "python scripts/test-study-release.py",
+    "audit:source": "python scripts/audit-study-repository.py"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Edmund724/BiliScript.git"
+    "url": "git+https://github.com/Maodawang-log/subtitle-assistant.git"
   },
   "keywords": [],
-  "author": "",
   "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/Edmund724/BiliScript/issues"
+    "url": "https://github.com/Maodawang-log/subtitle-assistant/issues"
   },
-  "homepage": "https://github.com/Edmund724/BiliScript#readme",
+  "homepage": "https://github.com/Maodawang-log/subtitle-assistant#readme",
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.11",
     "d3-selection": "3.0.0",
@@ -57,5 +62,20 @@
     "fflate": "0.8.3",
     "katex": "^0.16.47",
     "mermaid": "^12.0.0"
-  }
+  },
+  "private": true,
+  "contributors": [
+    {
+      "name": "haixiong1997",
+      "url": "https://github.com/haixiong1997"
+    },
+    {
+      "name": "Edmund724",
+      "url": "https://github.com/Edmund724"
+    },
+    {
+      "name": "Maodawang-log",
+      "url": "https://github.com/Maodawang-log"
+    }
+  ]
 }
