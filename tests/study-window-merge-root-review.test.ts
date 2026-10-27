@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";

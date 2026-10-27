@@ -16,7 +16,7 @@ import unittest
 NATIVE = Path(__file__).resolve().parents[1]
 RUNTIME_FILES = ['manager.py', 'catalog.py', 'model_files.py', 'host.py', 'Launcher.cs', 'model-catalog.json', 'service-provenance.json',
                  'Install-Connection.ps1', 'Uninstall-Connection.ps1', 'stop-owned-service.ps1', 'takeover-legacy.ps1', 'README.md',
-                 'service/server.py', 'service/window_audio.py', 'native-host.exe', 'Install-Connection.cmd', 'Uninstall-Connection.cmd']
+                 'service/server.py', 'service/window_audio.py', 'service/opening_repair.py', 'native-host.exe', 'Install-Connection.cmd', 'Uninstall-Connection.cmd']
 REGISTRY_PATHS = [r'HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.biliscript.local_models',
                   r'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.biliscript.local_models']
 
@@ -145,8 +145,8 @@ class InstallerUpgradeReview(unittest.TestCase):
         hashes.update(extra or {})
         self.write_json(self.package / 'package-hashes.json', hashes)
 
-    def invoke(self, injection='', install_directory='', registry=None):
-        config = {'registry': registry or [{'path': key, 'value': str(self.manifest_path)} for key in REGISTRY_PATHS], 'extensionId': 'b' * 32,
+    def invoke(self, injection='', install_directory='', registry=None, extension_id='b'*32):
+        config = {'registry': registry or [{'path': key, 'value': str(self.manifest_path)} for key in REGISTRY_PATHS], 'extensionId': extension_id,
                   'installer': str(self.package / 'Install-Connection.ps1'), 'package': str(self.package), 'result': str(self.root / 'result.json'),
                   'installDirectory': str(install_directory), 'injection': injection}
         self.write_json(self.root / 'configuration.json', config)
@@ -182,6 +182,20 @@ class InstallerUpgradeReview(unittest.TestCase):
             info = child.lstat()
             assert not stat.S_ISLNK(info.st_mode) and not (getattr(info, 'st_file_attributes', 0) & 0x400)
         self.temp.cleanup()
+
+    def test_upgrade_reuses_registered_extension_ids_without_prompt(self):
+        result=self.invoke(extension_id=[])
+        self.assertTrue(result['success'], result['error'])
+        manifest=json.loads((self.home/'native-host.json').read_text(encoding='utf-8-sig'))
+        self.assertEqual(manifest['allowed_origins'], ['chrome-extension://'+'a'*32+'/'])
+
+    def test_live_managed_service_rejects_upgrade_without_stopping_it(self):
+        self.write_json(self.home / 'managed-service.json', {'pid': os.getpid(), 'instance': 'private-live-test'})
+        before = {name: (self.home / name).read_bytes() for name in self.old_files}
+        result = self.invoke()
+        self.assertFalse(result['success']); self.assertEqual(result['registryWrites'], [])
+        self.assertIn('服务仍在运行', result['error'])
+        for name, data in before.items(): self.assertEqual((self.home / name).read_bytes(), data)
 
     def test_upgrade_adopts_registered_home_preserves_owner_state_pid_and_verifiable_old_code(self):
         result = self.invoke()

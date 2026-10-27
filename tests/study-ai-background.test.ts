@@ -5,7 +5,7 @@ import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";
 vi.mock("../extension/study/local-proxy.bg.js", () => ({}));
 
 const SETTINGS = "biliscriptJapaneseSettings";
-const CACHE = "biliscriptJapaneseAiCache";
+const CACHE = "biliscriptStudyTemporaryV2";
 const extensionId = "study-test";
 const configured = { baseUrl: "https://compatible.example/v1/", model: "japanese-text-model", apiKey: "synthetic-test-key" };
 const sender = (tabId = 7) => ({ id: extensionId, tab: { id: tabId } });
@@ -119,7 +119,7 @@ describe("study AI background integration", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const cached = disk.get(CACHE) as Record<string, unknown>;
     expect(Object.keys(cached)).toHaveLength(4);
-    expect(Object.keys(cached).every((key) => /^[0-9a-f]{64}$/.test(key))).toBe(true);
+    expect(Object.keys(cached).every((key) => /^ai:[0-9a-f]{64}$/.test(key))).toBe(true);
     expect(JSON.stringify(cached)).not.toContain(configured.apiKey);
     expect(JSON.stringify(cached)).not.toContain("rotated-synthetic-key");
   });
@@ -149,13 +149,22 @@ describe("study AI background integration", () => {
     expect(JSON.stringify(disk.get(CACHE))).toContain("other-tab-answer");
   });
 
+  it('cancels only the single-sentence listening channel while leaving global translation active',async()=>{
+    disk.set(SETTINGS,configured);const pending:any[]=[];
+    fetchMock.mockImplementation(async(_url:string,init:RequestInit)=>{const finish=deferred<Response>();pending.push({signal:init.signal,finish});return finish.promise});
+    const listening=studyRequest({text:'listening cue',channel:'listening-translation'}),global=studyRequest({text:'global cue',channel:'translation'});
+    await vi.waitFor(()=>expect(pending).toHaveLength(2));await dispatch({type:'study-stop-ai',channel:'listening-translation'}).response;
+    expect(pending[0].signal.aborted).toBe(true);expect(pending[1].signal.aborted).toBe(false);pending[0].finish.resolve(answer('STALE LISTENING'));pending[1].finish.resolve(answer('GLOBAL KEPT'));
+    expect(await listening.response).toMatchObject({ok:false,canceled:true});expect(await global.response).toMatchObject({ok:true,text:'GLOBAL KEPT'});expect(JSON.stringify(disk.get(CACHE))).not.toContain('STALE LISTENING');
+  });
+
   it("does not write cache or report success when stopped while a cache write is awaiting storage", async () => {
     disk.set(SETTINGS, configured);
     const originalGet = storage.get.getMockImplementation()!;
     const delayedCache = deferred<Record<string, unknown>>();
     let cacheReads = 0;
     storage.get.mockImplementation(async (key) => {
-      if (key === CACHE && ++cacheReads === 2) return delayedCache.promise;
+      if (Array.isArray(key) && key.includes(CACHE) && ++cacheReads === 2) return delayedCache.promise;
       return originalGet(key);
     });
     const pending = studyRequest();

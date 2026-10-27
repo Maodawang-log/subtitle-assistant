@@ -39,6 +39,63 @@ describe("model manager settings UI independent review", () => {
   }
   function select(id: string, value: string) { $<HTMLSelectElement>(id).value = value; $(id).dispatchEvent(new Event("change", { bubbles: true })); }
 
+  it("does not connect until recognition is opened and does not retry after connection loss", async () => {
+    storage.set(settingsKey,{asrModel:"medium"});
+    setupModelManager({deferConnection:true}); await flush();
+    await vi.advanceTimersByTimeAsync(4500);expect(send).not.toHaveBeenCalled();
+    document.dispatchEvent(new CustomEvent("study-settings-page",{detail:"recognition"}));await flush();
+    expect(actions()).toEqual(["status"]);
+    handlers.set("status",()=>({ok:false,error:"disconnected fixture"}));
+    await vi.advanceTimersByTimeAsync(1500);await flush();
+    expect($("managerConnection").textContent).toBe("连接不可用");
+    expect($("modelService").textContent).toBe("状态未知");
+    expect($("serviceModel").textContent).toContain("不代表识别服务已停止");
+    expect($<HTMLButtonElement>("managerStart").disabled).toBe(true);
+    expect($("models").childElementCount).toBe(0);
+    const count=send.mock.calls.length;await vi.advanceTimersByTimeAsync(6000);expect(send).toHaveBeenCalledTimes(count);
+    handlers.delete("status");await click("managerRefresh");expect($("managerConnection").textContent).toBe("已连接");
+    document.dispatchEvent(new CustomEvent("study-settings-page",{detail:"translation"}));
+    const paused=send.mock.calls.length;await vi.advanceTimersByTimeAsync(6000);expect(send).toHaveBeenCalledTimes(paused);
+  });
+
+  it("restores the saved selector after a failed model change without altering provider or startup defaults", async () => {
+    await open();const before=copy(storage.get(settingsKey));
+    handlers.set("setDefault",()=>({ok:false,error:"model unavailable"}));
+    select("asrModel","small");await flush();
+    expect($<HTMLSelectElement>("asrModel").value).toBe("medium");
+    expect(storage.get(settingsKey)).toEqual(before);
+    expect($("managerNote").textContent).toContain("model unavailable");
+    expect(requests("setLegacyDefault")).toHaveLength(0);
+    expect(requests("restart")).toHaveLength(0);
+  });
+
+  it("preserves focused controls and expanded model details during status-only polling", async () => {
+    await open();const details=card("small").querySelector("details")!;details.open=true;
+    const remove=button("small","删除模型文件");remove.focus();
+    await vi.advanceTimersByTimeAsync(4500);await flush();
+    expect(card("small").querySelector("details")).toBe(details);expect(details.open).toBe(true);
+    expect(document.activeElement).toBe(remove);
+  });
+
+  it("explains when a saved imported model still needs the running service to reload, without restarting it",async()=>{
+    const current:any=fixture();current.service={backend:{model:'medium'},available_models:['small','medium'],window_languages:['ja','en']};
+    await open(current);select('asrModel','imported-ja-demo');await flush();
+    expect($('modelAvailability').hidden).toBe(false);expect($('modelAvailability').textContent).toContain('在此管理服务');
+    expect((storage.get(settingsKey) as any).asrModel).toBe('imported-ja-demo');
+    expect(requests('restart')).toHaveLength(0);expect(requests('handover')).toHaveLength(0);
+  });
+
+  it.each([
+    {service:{foreign:true},managed:false,canStop:false,label:"端口被占用"},
+    {service:{active:1,queue:0,backend:{model:"small"}},managed:true,canStop:false,label:"正在识别"},
+    {service:{active:0,queue:0,other_consumer_recent:true,backend:{model:"small"}},managed:true,canStop:false,label:"已就绪"}
+  ])("keeps service controls safe in $label state",async({service,managed,canStop,label})=>{
+    await open({...fixture(),service,managedService:managed,canStop} as any);
+    expect($("modelService").textContent).toBe(label);
+    for(const id of ["managerStart","managerStop","managerRestart","managerHandover"])expect($<HTMLButtonElement>(id).disabled).toBe(true);
+    expect(actions()).toEqual(["status"]);
+  });
+
   beforeEach(() => {
     vi.useFakeTimers(); state = fixture(); storage = new Map(); handlers = new Map();
     document.body.innerHTML = readFileSync(join(process.cwd(), "extension/study/options.html"), "utf8");
@@ -70,19 +127,21 @@ describe("model manager settings UI independent review", () => {
     expect($<HTMLSelectElement>("asrModel").value).toBe("medium");
   });
 
-  it("builds dynamic Japanese choices and preserves an unsaved model selection through manual refresh and polling", async () => {
+  it("saves the single model selector independently of provider settings and retains it through polling", async () => {
     await open();
+    select("modelFilter", "ja");
     expect($("managerUpgrade").hidden).toBe(true);
     expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).toEqual(["small", "medium", "imported-ja-demo"]);
     expect(card("imported-ja-demo").textContent).toContain("42.0 MiB");
     expect(card("imported-ja-demo").textContent).toContain("多语言（含日语）");
     expect(card("large-v2").textContent).toContain("硬件负担更高");
     expect(card("large-v2").querySelector<HTMLAnchorElement>(".model-source")!.href).toBe("https://huggingface.co/Systran/faster-whisper-large-v2");
-    select("asrModel", "imported-ja-demo"); await click("managerRefresh");
+    select("asrModel", "imported-ja-demo"); await flush(); await click("managerRefresh");
     await vi.advanceTimersByTimeAsync(4500); await flush();
     expect($<HTMLSelectElement>("asrModel").value).toBe("imported-ja-demo");
-    expect((storage.get(settingsKey) as any).asrModel).toBe("medium");
-    expect(actions().every(action => action === "status")).toBe(true);
+    expect((storage.get(settingsKey) as any).asrModel).toBe("imported-ja-demo");
+    expect(actions().filter(action => action !== "status")).toEqual(["setDefault"]);
+    expect($("models").textContent).not.toContain("设为默认");
     await click("managerStart");
     expect(requests("start").at(-1).args).toEqual({ model: "imported-ja-demo", language: "ja" });
     expect(requests("download")).toHaveLength(0);
@@ -127,8 +186,12 @@ describe("model manager settings UI independent review", () => {
     expect(requests("delete")).toHaveLength(0); expect(card("imported-ja-demo")).toBeDefined();
   });
 
-  it("blocks deletion of both the saved default and the currently selected unsaved default", async () => {
-    await open(); select("asrModel", "small");
+  it("disables deletion of the selected default and checks the latest stored default before preview", async () => {
+    await open();
+    expect(button("medium", "删除模型文件").disabled).toBe(true);
+    select("asrModel", "small"); await flush();
+    expect(button("small", "删除模型文件").disabled).toBe(true);
+    storage.set(settingsKey,{...(storage.get(settingsKey) as any),asrModel:"medium"});
     button("medium", "删除模型文件").click(); await flush();
     expect($("managerNote").textContent).toContain("默认模型");
     button("small", "删除模型文件").click(); await flush();
@@ -166,9 +229,9 @@ describe("model manager settings UI independent review", () => {
   });
 
   it("keeps non-Japanese models out of the Japanese default selector while allowing read-only catalog filtering", async () => {
-    await open(); expect(card("base.en")).toBeUndefined();
+    await open(); select("modelFilter", "ja"); expect(card("base.en")).toBeUndefined();
     select("modelFilter", "all");
-    expect(card("base.en")).toBeDefined(); expect(button("base.en", "设为默认").disabled).toBe(true);
+    expect(card("base.en")).toBeDefined();
     expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("base.en");
     select("modelFilter", "installed"); expect(card("large-v2")).toBeUndefined();
     expect(actions()).toEqual(["status"]);
@@ -193,13 +256,12 @@ describe("model manager settings UI independent review", () => {
     await open(current);
     select("modelFilter", "en");
     expect([...$("models").querySelectorAll<HTMLElement>(".model-card")].map(node => node.dataset.model)).toEqual(["small", "medium", "base.en", "large-v2"]);
-    expect(button("base.en", "设为默认").disabled).toBe(true);
-    select("modelFilter", "all"); expect(button("unknown", "设为默认").disabled).toBe(true);
+    select("modelFilter", "all");
     expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("unknown");
     select("defaultSourceLanguage", "en");
     expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).toEqual(["small", "medium", "base.en"]);
-    expect(button("imported-ja-demo", "设为默认").disabled).toBe(true); expect(button("unknown", "设为默认").disabled).toBe(true);
-    expect(button("base.en", "设为默认").disabled).toBe(false);
+    expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("imported-ja-demo");
+    expect([...$<HTMLSelectElement>("asrModel").options].map(option => option.value)).not.toContain("unknown");
     expect(actions()).toEqual(["status"]);
   });
 
@@ -207,7 +269,7 @@ describe("model manager settings UI independent review", () => {
     await open(fixture(), "medium", language);
     select("modelFilter", "all");
     const model = language === "en" ? "base.en" : "small";
-    button(model, "设为默认").click(); await flush();
+    select("asrModel", model); await flush();
     expect(requests("setDefault").at(-1).args).toEqual({ model, language });
     expect(storage.get(settingsKey)).toMatchObject({ sourceLanguage: language, asrModel: model, retainedPreference: true, model: "fixture-provider", apiKey: "fixture-not-a-real-key" });
     await click("managerStart"); expect(requests("start").at(-1).args).toEqual({ model, language });
@@ -216,19 +278,20 @@ describe("model manager settings UI independent review", () => {
     expect(requests("restart").at(-1).args).toEqual({ model, language });
     state.managedService = false; await click("managerRefresh"); await click("managerHandover");
     expect(requests("handover").at(-1).args).toEqual({ model, language, confirm: "other-consumers-paused" });
-    expect(confirmation).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("暂停其他使用者"));
+    expect(confirmation).toHaveBeenCalledTimes(2);
+    expect(confirmation).toHaveBeenLastCalledWith(expect.stringContaining("暂停其他使用者"));
   });
 
   it.each([undefined, 1, 2])("blocks English operations for old manager protocol %s before sending native commands", async protocolVersion => {
     const old: any = fixture(); old.protocolVersion = protocolVersion; old.version = protocolVersion === 2 ? "1.1.0" : "1.0.0";
     await open(old, "medium", "en"); select("modelFilter", "all");
-    button("base.en", "设为默认").click(); await flush();
+    expect($<HTMLSelectElement>("asrModel").disabled).toBe(true);
     await click("managerStart");
     state.service = { backend: { model: "medium" }, active: false, queue: 0 }; state.managedService = true; state.canStop = true;
     await click("managerRefresh"); await click("managerRestart");
     state.managedService = false; await click("managerRefresh"); await click("managerHandover");
     for (const action of ["setDefault", "start", "restart", "handover"]) expect(requests(action)).toHaveLength(0);
-    expect($("managerNote").textContent).toContain("1.2.0");
+    expect($("managerUpgrade").textContent).toContain("1.2.0");
     expect((storage.get(settingsKey) as any).asrModel).toBe("medium");
   });
 });

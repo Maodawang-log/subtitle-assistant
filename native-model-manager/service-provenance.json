@@ -10,6 +10,8 @@
     "allow the study consumer header in extension CORS preflights",
     "explicit ja/en bounded source-language transcription; no translation task",
     "runtime supported-language guard and English-safe model warmup",
-    "English segment text spacing and advertised window languages"
+    "English segment text spacing and advertised window languages",
+    "opening repair v1: one gated 8s prefix retry in resident worker; original cues retained; cacheable negative checks",
+    "installer refuses to replace a running managed service"
   ]
 }

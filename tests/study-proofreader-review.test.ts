@@ -212,7 +212,7 @@ describe("manual sentence proofreading interaction", () => {
 });
 
 describe("proofreading background completion and cache boundary", () => {
-  const SETTINGS = "biliscriptJapaneseSettings", CACHE = "biliscriptJapaneseAiCache", extensionId = "proofread-test";
+  const SETTINGS = "biliscriptJapaneseSettings", CACHE = "biliscriptStudyTemporaryV2", extensionId = "proofread-test";
   const configuration = { baseUrl: "https://compatible.example/v1", model: "synthetic-model-A", apiKey: "synthetic-test-key" };
   let disk: Map<string, unknown>, fetchMock: ReturnType<typeof vi.fn>, handle: any, counter: number;
   const response = (finish_reason = "stop", text = suggestion()) => new Response(JSON.stringify({

@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { importStorageKey } from "../extension/study/source-language.js";
@@ -10,7 +11,7 @@ vi.mock("../extension/study/bounded-asr.js", () => ({
   createBoundedAsrController: (options: any) => { state.asrOptions = options; return { start: state.asrStart, stop: state.asrStop, seek() {}, updateTime() {} }; },
   requestStudyAudioWindow: vi.fn()
 }));
-vi.mock("../extension/study/inline-recorder.js", () => ({ createInlineRecorder: () => ({ clear() {}, stop() {}, open() {} }) }));
+vi.mock("../extension/study/inline-recorder.js", () => ({ createInlineRecorder: () => ({ clear() {}, stop() {}, open() {}, show() {}, setCurrent() {} }) }));
 
 const settingsKey = "biliscriptJapaneseSettings", url = "https://www.bilibili.com/video/BV1ab411c7mD/", identity = "BV1ab411c7mD:111";
 const sourceText = { ja: "日本語の字幕。", en: "Hello, world!" };
@@ -163,7 +164,7 @@ describe("route and language owned import independent content review", () => {
     disk.set(importStorageKey(route, "ja"), imported("KEEP_JAPANESE"));
     await mount(); await changeLanguage("en"); await click("enable");
     await importFile("1\n00:00:01,000 --> 00:00:03,000\nNew English line.\n");
-    expect(disk.get(importStorageKey(route, "en"))).toMatchObject({ language: "en", name: "source.srt", cues: [{ start: 1, end: 3, text: "New English line." }] });
+    await flush();expect(disk.get("biliscriptStudyTemporaryV2")["document:"+JSON.stringify([route,"en"])].value).toMatchObject({language:"en",source:"import",cues:[{start:1,end:3,text:"New English line."}]});expect(disk.has(importStorageKey(route,"en"))).toBe(false);
     expect(disk.get(importStorageKey(route, "ja")).cues[0].text).toBe("KEEP_JAPANESE");
     expect(disk.has("biliscript-study-import:" + route)).toBe(false);
   });

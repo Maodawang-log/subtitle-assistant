@@ -47,13 +47,13 @@ it("does not share identical text results across Japanese and English caches", a
   expect(await request({ language: "ja" })).toMatchObject({ ok: true, fromCache: true });
   expect(await request({ language: "en" })).toMatchObject({ ok: true, fromCache: true });
   expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(Object.keys(disk.get("biliscriptJapaneseAiCache"))).toHaveLength(2);
+  expect(Object.keys(disk.get("biliscriptStudyTemporaryV2"))).toHaveLength(2);
 });
 
 it("rejects unsupported source language before any provider request", async () => {
   expect(await request({ language: "ko" })).toMatchObject({ ok: false });
   expect(fetcher).not.toHaveBeenCalled();
-  expect(disk.get("biliscriptJapaneseAiCache")).toBeUndefined();
+  expect(disk.get("biliscriptStudyTemporaryV2")).toBeUndefined();
 });
 
 it("does not cache a delayed English response after the tab cancels language work", async () => {
@@ -65,5 +65,5 @@ it("does not cache a delayed English response after the tab cancels language wor
   handle({ type: "study-stop-ai" }, sender, () => {});
   finish(answer("不应显示的旧语言结果"));
   expect(await pending).toMatchObject({ ok: false, canceled: true });
-  expect(disk.get("biliscriptJapaneseAiCache")).toBeUndefined();
+  expect(disk.get("biliscriptStudyTemporaryV2")).toBeUndefined();
 });

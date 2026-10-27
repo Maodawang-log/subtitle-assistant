@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createWordPanel } from "../extension/study/word-panel.js";
 import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";

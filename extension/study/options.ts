@@ -1,31 +1,36 @@
 // @ts-nocheck
+import { setupCacheSettings } from "./cache-settings.js";
 import { setupModelManager } from "./model-manager-ui.js";
 import { setupAppearance } from "./appearance.js";
+import { setupSettingsNavigation } from "./settings-navigation.js";
+import { updateStudySettings } from "./settings-store.js";
 import { ZH_DICTIONARY,DICTIONARIES,DICTIONARY_ORIGINS,checkDictionaryUpdate } from "./dictionary-catalog.js";
 import { dictionaryInventory,setDefaultDictionary,lookupDictionary } from "./dictionary-db.js";
 const key="biliscriptJapaneseSettings",$=id=>document.getElementById(id);let previous={},release=ZH_DICTIONARY,installed,busy=true,operation="recover",inventory={installed:[],defaults:{}},lookupEpoch=0;
 const languageNames={ja:"日语",en:"英语",ko:"韩语",zh:"中文"},releases=new Map(DICTIONARIES.map(item=>[item.id,item]));
 const note=(id,text,error=false)=>{$(id).textContent=text;$(id).classList.toggle("error",error)};
 const download=(name,value,type="application/json")=>{const url=URL.createObjectURL(new Blob([value],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
-chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("defaultSourceLanguage").value=previous.sourceLanguage==="en"?"en":"ja";$("asrModel").value=previous.asrModel||"small";$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";note("status",previous.apiKey?"已保存 Key；留空可保持。":"尚未配置 Key。")});
-$("defaultSourceLanguage").onchange=async()=>{const latest=(await chrome.storage.local.get(key))[key]||{};await chrome.storage.local.set({[key]:{...latest,sourceLanguage:$("defaultSourceLanguage").value}});note("status","原语言默认值已保存；当前视频可在字幕面板单独选择。")};
+function providerState(data){const configured=!!data.apiKey;$("providerState").textContent=configured?"已配置":"未配置 Key";$("providerState").dataset.state=configured?"ready":"idle";$("apiKey").placeholder=configured?"已保存；留空保留原 Key":"填入 API Key";$("keyHint").textContent=configured?"已保存的 Key 不会显示在页面中；需要更换时直接填写。":"Key 仅保存在当前浏览器。";$("removeApiKey").hidden=!configured}
+const settingsReady=chrome.storage.local.get(key).then(x=>{previous=x[key]||{};$("defaultSourceLanguage").value=previous.sourceLanguage==="en"?"en":"ja";$("asrModel").value=previous.asrModel||"small";$("baseUrl").value=previous.baseUrl||"https://api.deepseek.com";$("model").value=previous.model||"deepseek-v4-flash";$("compatibility").value=previous.compatibility||"auto";providerState(previous)});
+$("defaultSourceLanguage").onchange=async()=>{const value=$("defaultSourceLanguage").value;$("defaultSourceLanguage").disabled=true;try{await updateStudySettings({sourceLanguage:value});note("languageStatus","已保存，新打开的视频使用"+(value==="en"?"英语":"日语")+"。")}catch(e){note("languageStatus","保存失败，请重新选择。",true)}finally{$("defaultSourceLanguage").disabled=false}};
+for(const id of ["baseUrl","model","apiKey","compatibility"])$(id).addEventListener("input",()=>{note("status","有未保存的修改。");$("providerState").textContent="尚未保存";$("providerState").dataset.state="busy"});
+$("showApiKey").onclick=()=>{const show=$("apiKey").type==="password";$("apiKey").type=show?"text":"password";$("showApiKey").textContent=show?"隐藏":"显示";$("showApiKey").setAttribute("aria-pressed",String(show))};
 $("save").onclick=async()=>{
+ for(const id of ["save","baseUrl","model","apiKey","compatibility","showApiKey","removeApiKey"])$(id).disabled=true;
  try{
   const latest=(await chrome.storage.local.get(key))[key]||{};
   const baseUrl=$("baseUrl").value.trim(),model=$("model").value.trim(),typedKey=$("apiKey").value.trim();
-  const data={...latest,asrModel:$("asrModel").value,sourceLanguage:$("defaultSourceLanguage").value,autoStart:false,autoTranslate:false};
-  if(baseUrl||model||typedKey){
-   let u;try{u=new URL(baseUrl)}catch{throw new Error("请填完整文字接口地址和模型；仅用本地功能可将两项留空。")}
+  const data={autoStart:false,autoTranslate:false};
+   let u;try{u=new URL(baseUrl)}catch{throw new Error("请填写完整的服务地址。仅使用本地功能时，无需保存此接口。")}
    if(u.username||u.password||u.search||u.hash||u.protocol!=="https:"&&!(u.protocol==="http:"&&["localhost","127.0.0.1"].includes(u.hostname)))throw new Error("请输入不含凭据或查询参数的HTTPS或本机HTTP地址");
-   if(!model)throw new Error("请填写模型名；仅用本地功能可将地址和模型都留空。");
+   if(!model)throw new Error("请填写服务提供的模型名称。");
    const apiKey=typedKey||latest.apiKey||"";
    if(apiKey){const granted=await chrome.permissions.request({origins:[u.origin+"/*"]});if(!granted)throw new Error("未允许访问该接口域名，未保存")}
    Object.assign(data,{baseUrl:u.href.replace(/\/+$/,""),model,compatibility:$("compatibility").value,apiKey});
-  }
-  await chrome.storage.local.set({[key]:data});previous=data;$("apiKey").value="";note("status",baseUrl||model?"已保存。关闭字幕再开启会应用新设置。":"本地设置已保存；已有文字接口设置保留。");
- }catch(e){note("status",e.message,true)}
+  previous=await updateStudySettings(data);$("apiKey").value="";$("apiKey").type="password";$("showApiKey").textContent="显示";$("showApiKey").setAttribute("aria-pressed","false");providerState(previous);note("status","接口已保存。关闭字幕再开启后生效。");
+ }catch(e){note("status",e.message,true)}finally{for(const id of ["save","baseUrl","model","apiKey","compatibility","showApiKey","removeApiKey"])$(id).disabled=false}
 };
-$("health").onclick=async()=>{try{const r=await chrome.runtime.sendMessage({type:"study-local-asr",action:"health",requestId:crypto.randomUUID()});if(!r?.ok)throw new Error(r?.error?.message||"本地服务未启动");note("status","本地识别服务可用。")}catch(e){note("status",e.message+" 请在下方‘本地模型与服务’连接并启动服务。",true)}};
+$("removeApiKey").onclick=async()=>{if(!confirm("移除当前浏览器保存的 API Key？\n本地识别、词典和录音仍可使用。"))return;try{previous=await updateStudySettings({apiKey:""});$("apiKey").value="";providerState(previous);note("status","已移除保存的 Key。")}catch(e){note("status",e.message,true)}};
 $("diagnostics").onclick=async()=>{const data=(await chrome.storage.local.get("biliscriptJapaneseAiDiagnostics")).biliscriptJapaneseAiDiagnostics||[];download("讲解安全诊断.json",JSON.stringify({version:1,entries:data},null,2));note("status","已导出最近20次请求的类型、结束原因和计数；不含 Key、地址、字幕或原始响应。")};
 const worker=new Worker(chrome.runtime.getURL("study/dictionary-worker.js"));
 function buttons(){
@@ -71,7 +76,7 @@ $("dictUpdate").onclick=async()=>{
  finally{busy=false;buttons()}
 };
 $("dictCancel").onclick=()=>{worker.postMessage({action:"cancel"});note("dictStatus","正在取消并清理未完成安装…")};
-$("dictDelete").onclick=()=>{busy=true;operation="delete";buttons();note("dictStatus","正在删除 "+release.name+"…");worker.postMessage({action:"delete",id:release.id})};
+$("dictDelete").onclick=()=>{if(!installed||!confirm("删除“"+release.name+"”？\n以后需要重新下载，其他词典与生词本保留。"))return;busy=true;operation="delete";buttons();note("dictStatus","正在删除 "+release.name+"…");worker.postMessage({action:"delete",id:release.id})};
 $("dictImport").onclick=()=>$("dictFile").click();
 $("dictExample").onclick=()=>download("日中词典格式示例.json",JSON.stringify({"食べる":{reading:"たべる",meaning:"吃"}},null,2));
 $("dictFile").onchange=async()=>{
@@ -88,5 +93,5 @@ $("lookup").onclick=async()=>{
  try{const entries=await lookupDictionary([text],language);if(mine!==lookupEpoch)return;$("lookupResult").replaceChildren();if(!entries.length){$("lookupResult").textContent="当前语言的默认词典未命中；请先安装词典，或改用词典原形。";return}for(const item of entries){const p=document.createElement("p");p.textContent=item.term+" · "+item.reading+"\n"+item.meaning+"\n来源："+item.source;$("lookupResult").append(p)}}catch{if(mine===lookupEpoch)note("lookupResult","词典查询失败，请重新打开设置检查安装状态。",true)}
 };
 
-setupModelManager();
-setupAppearance();
+void settingsReady.then(()=>{setupAppearance();setupModelManager({deferConnection:true});setupSettingsNavigation();setupCacheSettings()});
+$("lookupText").addEventListener("keydown",event=>{if(event.key==="Enter")$("lookup").click()});

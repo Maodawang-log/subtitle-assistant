@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createBoundedAsrController,

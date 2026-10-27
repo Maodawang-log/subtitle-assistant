@@ -164,6 +164,11 @@ def gpu_worker(pipe, preferred, model_id):
                 for chunk in chunks:
                     for cue in sentence_segments(chunk, duration):
                         segments.append({"id": len(segments), **cue})
+                opening = None
+                if job.get("window"):
+                    from opening_repair import repair_opening
+                    segments, opening = repair_opening(model, audio, job["language"], segments, sentence_segments, window_start=job["start"])
+                    segments = [{**cue, "id": i} for i, cue in enumerate(segments)]
                 result = {
                     "task": "transcribe", "language": info.language, "duration": round(duration, 3),
                     "text": (" " if info.language == "en" else "").join(s["text"] for s in segments), "segments": segments,
@@ -179,7 +184,7 @@ def gpu_worker(pipe, preferred, model_id):
                             word["start"] = round(word["start"] + offset, 3)
                             word["end"] = round(word["end"] + offset, 3)
                     result.update(timestamp_origin="absolute", start=offset,
-                                  requested_duration=job["duration"], request_id=job["request_id"], download=download)
+                                  requested_duration=job["duration"], request_id=job["request_id"], download=download, opening_repair=opening)
                 pipe.send({"kind": "result", "result": result})
             except ValueError as exc:
                 pipe.send({"kind": "error", "status": 400, "message": str(exc)})
@@ -337,7 +342,7 @@ async def lifespan(app):
         await asyncio.to_thread(engine.stop)
 
 
-app = FastAPI(title="Local Subtitle ASR", version="1.2.0", lifespan=lifespan)
+app = FastAPI(title="Local Subtitle ASR", version="1.2.1", lifespan=lifespan)
 app.add_middleware(CORSMiddleware,
     allow_origin_regex=r"^chrome-extension://[a-p]{32}$",
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -407,7 +412,7 @@ async def shared_consumer_guard(request, call_next):
 @app.get("/health")
 async def health():
     return {"status": "ok" if engine.last_backend else "model_unavailable", "service": "local-japanese-asr",
-            "version": "1.2.0", "window_languages": ["ja", "en"],
+            "version": "1.2.1", "window_languages": ["ja", "en"], "opening_repair_version": 1,
             "base_path": str(BASE), "default_model": MODEL_ID, "manager_instance": MANAGER_INSTANCE,
             "other_consumer_recent": bool(OTHER_CONSUMER_AT and time.time() - OTHER_CONSUMER_AT < 900),
             "available_models": [name for name, path in MODEL_DIRS.items() if (path / "model.bin").is_file()],

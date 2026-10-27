@@ -11,6 +11,7 @@ export interface JapaneseCcResult {
   bvid: string;
   cid: string;
   title: string;
+  duration?: number;
   tracks: SubtitleTrack[];
   cues: StudyCue[];
   chineseCues?: StudyCue[];
@@ -136,7 +137,7 @@ export function createJapaneseCcSource(deps: CcSourceDependencies) {
       throw new StudyCcError("TRACK", `所选${name}字幕轨已不可用`);
     }
     const selected = preferred || japanese.find((track) => !/^ai-/i.test(track.lan)) || japanese[0];
-    const result: JapaneseCcResult = { status: selected ? "ready" : language === "ja" ? "no-japanese" : "no-source", bvid, cid, title, tracks, cues: [] };
+    const result: JapaneseCcResult = { status: selected ? "ready" : language === "ja" ? "no-japanese" : "no-source", bvid, cid, title, duration:page?.duration || (pageIndex===1?meta.defaultDuration:0) || undefined, tracks, cues: [] };
     if (!selected) return result; // Chinese-only CC is never relabelled or back-translated.
     status(`正在读取${name}字幕…`);
     result.cues = cueBody(await transport(selected.subtitleUrl));

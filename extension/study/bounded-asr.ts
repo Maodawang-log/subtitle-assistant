@@ -23,6 +23,7 @@ export interface StudyAsrStart {
   // Omission is deliberately the same as false. Merely creating the controller
   // or visiting a video page must not fetch audio or start a local model.
   enabled?: boolean;
+  completedWindows?: Array<{start:number;end:number}>;
   bvid: string;
   cid: string | number;
   currentTime: number;
@@ -90,6 +91,9 @@ export interface BoundedAsrController {
   stop(): void;
   seek(time: number, validatedAudioSource?: StudyValidatedAudioSource): void;
   updateTime(time: number): void;
+  collectAll(): Promise<void>;
+  cancelCollection(): void;
+  readonly collecting: boolean;
 }
 
 interface WindowSlot {
@@ -210,6 +214,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   const cacheLimit = Math.max(2, Math.min(128, Math.floor(options.cacheLimit || 64)));
   const cacheStore = options.cacheStore === null ? undefined : options.cacheStore || createChromeStudyAudioCache(cacheLimit);
   const cache = new Map<string, StudyAudioCue[]>();
+  const openingVersions = new Map<string, number>();
   let cacheReady: Promise<void> | undefined;
   let cacheWrites = Promise.resolve();
   let session: Session | undefined;
@@ -217,6 +222,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   let queue: WindowSlot[] = [];
   let timer: ReturnType<typeof setInterval> | undefined;
   let lastStatus = "";
+  let collection: {owner:Session;resolve:()=>void;reject:(error:Error)=>void}|undefined;
 
   function status(phase: StudyAsrStatus["phase"], message: string, owner = session, slot?: WindowSlot): void {
     const next: StudyAsrStatus = {
@@ -234,6 +240,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   function stop(): void {
     // Clear the owner before aborting: even a late or non-cooperative transport
     // cannot cache/emit an old video's response or schedule the next window.
+    collection?.reject(abortError());collection=undefined;
     const previousSession = session;
     session = undefined;
     queue = [];
@@ -248,9 +255,9 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   }
 
   function desired(owner: Session): WindowSlot[] {
-    if (owner.duration !== undefined && owner.currentTime >= owner.duration) return [];
-    const start = Math.floor(owner.currentTime / STUDY_ASR_CHUNK_SECONDS) * STUDY_ASR_CHUNK_SECONDS;
-    const end = Math.min(start + STUDY_ASR_AHEAD_SECONDS, owner.duration ?? Infinity);
+    if (!collection && owner.duration !== undefined && owner.currentTime >= owner.duration) return [];
+    const start = collection?.owner===owner ? 0 : Math.floor(owner.currentTime / STUDY_ASR_CHUNK_SECONDS) * STUDY_ASR_CHUNK_SECONDS;
+    const end = collection?.owner===owner ? owner.duration! : Math.min(start + STUDY_ASR_AHEAD_SECONDS, owner.duration ?? Infinity);
     const slots: WindowSlot[] = [];
     // Current + next 30-second window. Their furthest end is never later than
     // playbackTime + 60 seconds, and there is only one in-flight audio request.
@@ -279,9 +286,9 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   function putCache(key: string, cues: StudyAudioCue[], persist = true): void {
     cache.delete(key);
     cache.set(key, cues);
-    while (cache.size > cacheLimit) cache.delete(cache.keys().next().value!);
+    while (cache.size > cacheLimit) { const oldest=cache.keys().next().value!;cache.delete(oldest);openingVersions.delete(oldest); }
     if (persist && cacheStore) {
-      const entries = [...cache].map(([entryKey, entryCues]) => ({ key: entryKey, cues: entryCues }));
+      const entries = [...cache].map(([entryKey, entryCues]) => ({ key: entryKey, cues: entryCues, ...(openingVersions.get(entryKey)===1?{openingRepairVersion:1}:{}) }));
       // Serialize snapshots so a slow earlier write cannot replace newer LRU
       // state. Storage failure does not turn successful speech recognition into
       // a failure or trigger audio downloads again in this session.
@@ -292,7 +299,14 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
   function loadCache(): Promise<void> {
     if (!cacheReady) {
       cacheReady = cacheStore ? cacheStore.read().then((entries) => {
-        for (const entry of entries.slice(-cacheLimit)) putCache(entry.key, entry.cues, false);
+        for (const entry of entries.slice(-cacheLimit)) {
+          // Only opening windows need rechecking after this algorithm upgrade.
+          // User corrections live under separate storage keys and are untouched.
+          const start=JSON.parse(entry.key)[4];
+          if(start===0 && entry.openingRepairVersion!==1)continue;
+          if(entry.openingRepairVersion===1)openingVersions.set(entry.key,1);
+          putCache(entry.key, entry.cues, false);
+        }
       }).catch(() => {}) : Promise.resolve();
     }
     return cacheReady;
@@ -303,6 +317,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     const slots = desired(owner);
     queue = [];
     for (const slot of slots) {
+      if(owner.delivered.has(slot.key))continue;
       const hit = cache.get(slot.key);
       if (hit) {
         putCache(slot.key, hit);
@@ -318,6 +333,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     if (session !== owner || active || !owner.source) return;
     const slot = queue.shift();
     if (!slot) {
+      if(collection?.owner===owner){const done=collection;collection=undefined;if(owner.failed.size)done.reject(new Error("部分窗口识别失败，已保留取得的字幕；可手动重试"));else done.resolve();}
       const current = desired(owner)[0];
       const failure = current && owner.failed.get(current.key);
       if (failure) status("error", `当前片段识别失败：${failure}。关闭后重新开启可重试。`, owner, current);
@@ -330,7 +346,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     active = job;
     const current = desired(owner)[0];
     const isCurrentReady = current && cache.has(current.key);
-    status(isCurrentReady ? "transcribing" : "waiting", isCurrentReady
+    status(isCurrentReady ? "transcribing" : "waiting", collection?.owner===owner ? `正在收集全片：${Math.min(owner.delivered.size,Math.ceil(owner.duration!/30))} / ${Math.ceil(owner.duration!/30)} 个片段` : isCurrentReady
       ? "正在识别后续片段…"
       : "正在识别当前播放位置，字幕生成后会显示，请稍候…", owner, slot);
     void requestWindow({
@@ -345,6 +361,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     }, job.abort.signal).then((raw) => {
       if (session !== owner || job.abort.signal.aborted) return;
       const cues = normalizeStudyAudioCues(raw, slot);
+      if ((raw as {opening_repair?:{version?:number}})?.opening_repair?.version===1)openingVersions.set(slot.key,1);
       putCache(slot.key, cues);
       deliver(owner, slot, cues, false);
     }).catch((error: unknown) => {
@@ -365,7 +382,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     const oldAnchor = Math.floor(owner.currentTime / STUDY_ASR_CHUNK_SECONDS);
     owner.currentTime = next;
     const newAnchor = Math.floor(next / STUDY_ASR_CHUNK_SECONDS);
-    if (oldAnchor === newAnchor) return;
+    if (collection?.owner===owner || oldAnchor === newAnchor) return;
     if (active && !desired(owner).some((slot) => slot.key === active?.slot.key)) {
       const previous = active;
       active = undefined;
@@ -378,6 +395,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     const owner = session;
     if (!owner || !Number.isFinite(time)) return;
     owner.currentTime = Math.max(0, time);
+    if(collection?.owner===owner)return;
     queue = [];
     const previous = active;
     active = undefined;
@@ -432,6 +450,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       if (session !== owner || owner.sourceAbort !== attempt || attempt.signal.aborted) return;
       if (timer !== undefined) clearInterval(timer);
       timer = undefined;
+      if(collection?.owner===owner){const failed=collection;collection=undefined;failed.reject(new Error(readableError(error)));}
       status("error", `无法取得音轨：${readableError(error)}`, owner);
     });
   }
@@ -469,6 +488,7 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       failed: new Map()
     };
     session = owner;
+    for(const range of input.completedWindows||[])for(let start=Math.ceil(range.start/30)*30;start<range.end;start+=30){const duration=Math.min(30,(owner.duration??Infinity)-start);if(start+duration<=range.end+.01)owner.delivered.add(studyAudioCacheKey({...owner,start,duration}));}
     if (options.getCurrentTime) {
       timer = setInterval(() => {
         if (session !== owner) return;
@@ -478,5 +498,13 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     acquireSource(owner, input.validatedAudioSource);
   }
 
-  return { start, stop, seek, updateTime };
+  function collectAll():Promise<void>{
+    const owner=session;
+    if(!owner||!owner.duration||!Number.isFinite(owner.duration))return Promise.reject(new Error("无法确认可播放时长，未启动全片收集"));
+    if(collection)return Promise.reject(new Error("已经在收集全片"));
+    owner.failed.clear();
+    return new Promise((resolve,reject)=>{collection={owner,resolve,reject};plan(owner)});
+  }
+  function cancelCollection(){const old=collection;collection=undefined;old?.reject(abortError());if(active){const job=active;active=undefined;job.abort.abort()}if(session)plan(session)}
+  return { start, stop, seek, updateTime, collectAll, cancelCollection, get collecting(){return !!collection} };
 }

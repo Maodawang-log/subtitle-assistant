@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { APPEARANCE_KEY, DEFAULT_APPEARANCE, appearanceCss, normalizeAppearance, setupAppearance } from "../extension/study/appearance.js";
 import { createWordPanel } from "../extension/study/word-panel.js";
@@ -268,7 +269,7 @@ describe("practice device selection and retained recording independent review", 
     expect(practice.parentElement).toBe(element("practiceHome"));
     await click("micStart"); fullscreen = full; shell.mount(video);
     expect(element("practice")).toBe(practice); expect(element("micAudio")).toBe(audio);
-    expect(practice.parentElement).toBe(element("learningControls")); expect(created[0].state).toBe("recording");
+    expect(practice.parentElement).toBe(element("practiceHome")); expect(created[0].state).toBe("recording");
     expect(getUserMedia).toHaveBeenCalledTimes(1); expect(streams[0].getTracks()[0].stop).not.toHaveBeenCalled();
     await click("micStop"); created[0].finish("retained-mode-recording"); await flush(); const url = audio.src;
     fullscreen = null; shell.mount(video);

@@ -54,7 +54,7 @@ it("does not erase an adopted correction when seeking re-delivers the identical 
   expect(timeline.cues[0].originalText).toBe("元の認識字幕。");
 });
 
-it("preserves unchanged corrected segments while a genuinely changed segment receives a new identity", () => {
+it("preserves explicit corrections even when recognition produces a changed hypothesis", () => {
   const timeline=createCueTimeline();
   timeline.replaceWindow([{start:1,end:3,text:"原文一。"},{start:4,end:6,text:"原文二。"}],meta());
   const [a,b]=timeline.cues;
@@ -62,8 +62,8 @@ it("preserves unchanged corrected segments while a genuinely changed segment rec
   timeline.edit(b.id,b.revision,"校正二。");
   timeline.replaceWindow([{start:1,end:3,text:"原文一。"},{start:4,end:6,text:"再認識二。"}],meta());
   expect(timeline.cues[0]).toEqual(edited);
-  expect(timeline.cues[1].text).toBe("再認識二。");
-  expect(timeline.cues[1].id).not.toBe(b.id);
+  expect(timeline.cues[1].text).toBe("校正二。");
+  expect(timeline.cues[1].id).toBe(b.id);
 });
 
 it("does not promote a cached older window above a newer overlapping correction", () => {
@@ -73,4 +73,14 @@ it("does not promote a cached older window above a newer overlapping correction"
   const before=timeline.cues.map(c=>({...c}));
   timeline.replaceWindow(original,meta());
   expect(timeline.cues).toEqual(before);
+});
+
+it("restores saved revisions over changed timing and empty ASR windows without moving the edited interval",()=>{
+ const timeline=createCueTimeline();timeline.setCorrections([{start:1,end:3,text:'Edited',originalText:'Original'}]);
+ timeline.replaceWindow([{start:0,end:4,text:'Changed hypothesis'}],meta());
+ expect(timeline.cues.find(c=>c.edited)).toMatchObject({start:1,end:3,text:'Edited',originalText:'Original'});
+ timeline.replaceWindow([],meta());expect(timeline.cues).toHaveLength(1);
+ expect(timeline.cues[0]).toMatchObject({start:1,end:3,text:'Edited'});
+ timeline.clear();timeline.replaceWindow([{start:1,end:3,text:'Another video'}],{...meta(),resourceId:'video-b:2'});
+ expect(timeline.cues[0].text).toBe('Another video');
 });

@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { createVocabularyReview } from "./vocabulary-review.js";
+import { learningAction } from "./learning-store.js";
 import { normalizeSourceLanguage } from "./source-language.js";
 import { renderDictionaryResults } from "./dictionary-view.js";
 export function createWordPanel(ui, options) {
@@ -7,17 +9,18 @@ export function createWordPanel(ui, options) {
  const languageOf=item=>normalizeSourceLanguage(item.language??item.source?.language);
  const currentLanguage=()=>normalizeSourceLanguage(options.language?.());
  const sameWord=(item,term,language)=>item.term===term&&languageOf(item)===language;
- const persist=()=>{const snapshot=vocabulary.slice();write=write.catch(()=>{}).then(()=>chrome.storage.local.set({[key]:snapshot}));return write};
+ const persist=(item,save)=>{write=write.catch(()=>{}).then(()=>learningAction("vocabulary",{item:{...item,language:languageOf(item)},save})).then(items=>{vocabulary=items;renderBook();updateStars()});return write};
+ const review=ui.$("startReview")?createVocabularyReview(ui,{items:()=>vocabulary,language:currentLanguage,error:options.error}):null;
  function updateStars(){for(const item of stars){if(!item.button.isConnected){stars.delete(item);continue}const saved=vocabulary.some(x=>sameWord(x,item.term,item.language));item.button.textContent=saved?"★":"☆";item.button.setAttribute("aria-pressed",String(saved));item.button.setAttribute("aria-label",(saved?"取消收藏 ":"收藏 ")+item.term);item.button.title=saved?"取消收藏":"收藏到生词本"}}
  function renderBook(){
-  const target=$("wordList");target.replaceChildren();
+  const target=$("wordList");target.replaceChildren();review?.refresh();
   const visible=vocabulary.filter(item=>languageOf(item)===currentLanguage());
   if(!visible.length){const p=document.createElement("p");p.className="empty";p.textContent="点击单词右侧的星标，收藏到这里。";target.append(p)}
   for(const item of visible){
    const card=document.createElement("article");card.className="saved-word";
    const title=document.createElement("strong"),meaning=document.createElement("p"),remove=document.createElement("button"),details=document.createElement("details"),summary=document.createElement("summary"),preview=document.createElement("span");
    title.textContent=item.term+" "+(item.reading||"");meaning.textContent=item.meaning||"";remove.textContent="移除";
-   remove.onclick=()=>{vocabulary=vocabulary.filter(x=>!sameWord(x,item.term,languageOf(item)));void persist().catch(options.error);renderBook();updateStars()};
+   remove.onclick=()=>{vocabulary=vocabulary.filter(x=>!sameWord(x,item.term,languageOf(item)));void persist(item,false).catch(options.error);renderBook();updateStars()};
    preview.className="saved-preview";preview.textContent=item.meaning||"暂无释义";summary.append(title,preview);details.append(summary,meaning);card.append(remove,details);
    if(item.source?.sentence){const p=document.createElement("p");p.className="source-sentence";p.textContent=item.source.sentence;details.append(p)}
    if(item.source?.url&&Number.isFinite(item.source.time)){
@@ -46,9 +49,9 @@ export function createWordPanel(ui, options) {
    if(options.explain){const explain=document.createElement("button");explain.className="word-explain";explain.textContent="AI 词义与变形";explain.onclick=()=>options.explain(token,source);body.append(explain)}
    $("wordDetail").append(card);updateStars();
    star.onclick=()=>{
-    if(vocabulary.some(x=>sameWord(x,lemma,language)))vocabulary=vocabulary.filter(x=>!sameWord(x,lemma,language));
-    else vocabulary=[{term:lemma,language,reading:language==="ja"?JSTUDY.hiragana(token.reading):"",meaning:meaning.textContent,at:Date.now(),...(source?{source:{...source}}:{})},...vocabulary].slice(0,1000);
-    updateStars();renderBook();void persist().catch(options.error);
+    const existing=vocabulary.find(x=>sameWord(x,lemma,language)),item=existing||{term:lemma,language,reading:language==="ja"?JSTUDY.hiragana(token.reading):"",meaning:meaning.textContent,at:Date.now(),...(source?{source:{...source}}:{})};
+    if(existing)vocabulary=vocabulary.filter(x=>!sameWord(x,lemma,language));else vocabulary=[item,...vocabulary];
+    updateStars();renderBook();void persist(item,!existing).catch(options.error);
    };
    try{const r=await options.lookup((language==="ja"?[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)]:[lemma,token.surface_form]).filter(Boolean),language);if(mine!==epoch||binding!==options.binding())return;
     if(r?.ok&&r.entries?.length)renderDictionaryResults(meaning,r.entries);
@@ -60,5 +63,5 @@ export function createWordPanel(ui, options) {
  chrome.storage.local.get(key).then(data=>{vocabulary=Array.isArray(data[key])?data[key].filter(x=>x&&typeof x.term==="string"):[];renderBook();updateStars()});
  chrome.storage.onChanged?.addListener((changes,area)=>{if(area==="local"&&changes[key]){vocabulary=Array.isArray(changes[key].newValue)?changes[key].newValue:[];renderBook();updateStars()}});
  $("exportWords").onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(vocabulary,null,2)],{type:"application/json"})),a=document.createElement("a");a.href=url;a.download="生词.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
- return {show,reset(clear=false){epoch++;renderBook();if(clear){$("wordDetail").replaceChildren();const p=document.createElement("p");p.className="empty";p.textContent="点击字幕单词，或拖选片段查看释义。";$("wordDetail").append(p);stars.clear()}},get items(){return vocabulary}};
+ return {show,reset(clear=false){epoch++;review?.reset();renderBook();if(clear){$("wordDetail").replaceChildren();const p=document.createElement("p");p.className="empty";p.textContent="点击字幕单词，或拖选片段查看释义。";$("wordDetail").append(p);stars.clear()}},get items(){return vocabulary}};
 }

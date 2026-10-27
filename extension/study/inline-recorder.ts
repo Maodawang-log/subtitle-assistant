@@ -82,5 +82,8 @@ export function createInlineRecorder(ui:any,reference:(cue:any)=>Promise<void>,p
   if(cue&&(cue.start!==c.start||cue.end!==c.end||cue.text!==c.text))clear();
   cue={...c};$("practiceCue").textContent=c.text;$("practice").hidden=false;ui.reveal();ui.layoutChanged?.();
   void ready.then(enumerate).catch(()=>{});
- },clear,stop};
+ },
+ setCurrent(c:any){if(c){cue={...c};$("practiceCue").textContent=c.text}},
+ show(c:any){cue={...c};$("practiceCue").textContent=c.text;$("practice").hidden=false;ui.reveal();ui.layoutChanged?.();void ready.then(enumerate).catch(()=>{})},
+ clear,stop};
 }

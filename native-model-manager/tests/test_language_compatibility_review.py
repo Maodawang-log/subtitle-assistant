@@ -26,6 +26,7 @@ import numpy as np  # Import once, outside temporary sys.modules substitutions.
 
 NATIVE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(NATIVE))
+sys.path.insert(0, str(NATIVE / "service"))
 import catalog
 from manager import Manager, safe_path
 from model_files import inspect_model

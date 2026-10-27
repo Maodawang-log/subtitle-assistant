@@ -7,20 +7,27 @@ import { normalizeSourceLanguage, sourceLanguageName } from "./source-language.j
 import { parseAiResponse, aiRequestPolicy } from "./ai-response.js";
 import { lookupDictionary } from "./dictionary-db.js";
 import { parseProofreading } from "./proofreading-result.js";
+import { createLearningStore } from "./learning-store.js";
+import { createLearningAi } from "./learning-ai.js";
+import { installStudyActionEntry } from "./action-entry.bg.js";
 const SETTINGS="biliscriptJapaneseSettings",CACHE="biliscriptJapaneseAiCache",DIAGNOSTICS="biliscriptJapaneseAiDiagnostics";
 const DEFAULTS={autoStart:false,autoTranslate:false,asrModel:"small",sourceLanguage:"ja",baseUrl:"https://api.deepseek.com",model:"deepseek-v4-flash",apiKey:"",compatibility:"auto"};
 const running=new Map();let cacheWrite=Promise.resolve(),diagnosticWrite=Promise.resolve();
 const config=async()=>({...DEFAULTS,...(await chrome.storage.local.get(SETTINGS))[SETTINGS]});
-const publicConfig=async()=>{const c=await config();return {autoStart:false,autoTranslate:false,sourceLanguage:normalizeSourceLanguage(c.sourceLanguage),asrModel:/^[a-zA-Z0-9_.-]{1,80}$/.test(c.asrModel)?c.asrModel:"small",baseUrl:c.baseUrl,model:c.model,configured:!!c.apiKey}};
+const publicConfig=async()=>{const c=await config();return {autoStart:false,autoTranslate:false,sourceLanguage:normalizeSourceLanguage(c.sourceLanguage),asrModel:/^[a-zA-Z0-9_.-]{1,80}$/.test(c.asrModel)?c.asrModel:"small",baseUrl:c.baseUrl,model:c.model,compatibility:c.compatibility,configured:!!c.apiKey}};
 function logDiagnostic(d){diagnosticWrite=diagnosticWrite.catch(()=>{}).then(async()=>{const old=(await chrome.storage.local.get(DIAGNOSTICS))[DIAGNOSTICS]||[];await chrome.storage.local.set({[DIAGNOSTICS]:[d,...old].slice(0,20)})});return diagnosticWrite.catch(()=>{})}
-chrome.action.onClicked.addListener(tab=>{if(tab.id)chrome.tabs.sendMessage(tab.id,{type:"study-toggle"}).catch(()=>{})});
-function abortTab(tabId,channel){for(const [key,entry]of running)if(entry.tabId===tabId&&(!channel||entry.channel===channel)){entry.controller.abort();running.delete(key)}}
+const learningStore=createLearningStore(chrome.storage.local),learningAi=createLearningAi(config,learningStore);
+installStudyActionEntry();
+function abortTab(tabId,channel){if(!channel||channel==="learning")learningAi.stop(tabId);for(const [key,entry]of running)if(entry.tabId===tabId&&(!channel||entry.channel===channel)){entry.controller.abort();running.delete(key)}}
 chrome.tabs.onRemoved.addListener(abortTab);
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(sender.id!==chrome.runtime.id)return;
+ if(m?.type==="study-learning-store"){learningStore.action(m.action,m.payload).then(data=>reply({ok:true,data})).catch(e=>reply({ok:false,error:e.message}));return true}
+ if(m?.type==="study-learning-ai"){learningAi.request(m,sender.tab?.id).then(data=>reply({ok:true,...data})).catch(e=>reply({ok:false,canceled:e.name==="AbortError",error:e.name==="AbortError"?"任务已停止":e.message}));return true}
+ if(m?.type==="study-learning-stop"){learningAi.stop(sender.tab?.id);reply({ok:true});return false}
  if(m?.type==="study-settings-public"){publicConfig().then(c=>reply({ok:true,config:c}));return true}
  if(m?.type==="study-open-options"){chrome.runtime.openOptionsPage();reply({ok:true});return false}
- if(m?.type==="study-stop-ai"){abortTab(sender.tab?.id,["translation","selection","explanation","proofread"].includes(m.channel)?m.channel:undefined);reply({ok:true});return false}
+ if(m?.type==="study-stop-ai"){abortTab(sender.tab?.id,["translation","listening-translation","selection","explanation","proofread"].includes(m.channel)?m.channel:undefined);reply({ok:true});return false}
  if(m?.type==="study-dictionary-lookup"){
   const queries=Array.isArray(m.queries)?m.queries.filter(x=>typeof x==="string"&&x.length>0&&x.length<100).slice(0,4):[];
   const language=m.language===undefined?"ja":m.language;if(!["ja","en"].includes(language)){reply({ok:false,error:"本版尚未提供所选语言的词典"});return false}
@@ -30,7 +37,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  const tabId=sender.tab?.id;if(!tabId){reply({ok:false,error:"只接受当前视频的学习请求"});return false}
  const requestId=String(m.requestId||"").slice(0,100),key=tabId+":"+requestId,controller=new AbortController();
  if(running.has(key)||[...running.values()].filter(e=>e.tabId===tabId).length>=3){reply({ok:false,error:"当前已有文字请求，请稍后再试。"});return false}
- running.set(key,{tabId,controller,channel:["translation","selection","explanation","proofread"].includes(m.channel)?m.channel:m.kind==="translate"?"translation":"explanation"});
+ running.set(key,{tabId,controller,channel:["translation","listening-translation","selection","explanation","proofread"].includes(m.channel)?m.channel:m.kind==="translate"?"translation":"explanation"});
  (async()=>{
   const c=await config();if(!c.apiKey)throw new Error("尚未配置文字接口 Key；原文字幕、本地识别、句控和录音仍可用。");
   let base;try{base=new URL(c.baseUrl)}catch{throw new Error("服务地址应为 HTTPS 或本机 HTTP")}
@@ -43,9 +50,9 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   const policy=aiRequestPolicy(base,m.kind,scope,c.compatibility);
   const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify({v:5,base:c.baseUrl,model:c.model,kind:m.kind,scope,policy,text,context,resource:m.resource,...(m.kind==="proofread"?{cueRevisionKey:m.cueRevisionKey}:{}),language})));
   const cacheKey=Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("");
-  const cached=(await chrome.storage.local.get(CACHE))[CACHE]||{};
+  const cached=await learningStore.cacheGet("ai:"+cacheKey);
   if(controller.signal.aborted)throw new DOMException("已停止","AbortError");
-  if(cached[cacheKey])return {ok:true,text:cached[cacheKey].text,fromCache:true};
+  if(cached)return {ok:true,text:cached.text,fromCache:true};
   const prompts={
    translate:"仅将选中日语字幕翻译成自然简体中文，保留语气和人称；上下文只作理解。只返回译文，不解释，不补充画面或未给出的剧情。",
    word:"用简体中文解释这个日语词在所给上下文中的意思、假名读音、词典原形、词性及变形。用简短标题和列表，歧义要标明；不评价用户发音。",
@@ -85,12 +92,7 @@ chrome.runtime.onMessage.addListener((m,sender,reply)=>{
   if(controller.signal.aborted)throw new DOMException("已停止","AbortError");
   // Only a final answer is cached; limited/interrupted/unconfirmed text is not.
   if(parsed.code==="OK"){
-   cacheWrite=cacheWrite.catch(()=>{}).then(async()=>{
-    if(controller.signal.aborted)return;const cache=(await chrome.storage.local.get(CACHE))[CACHE]||{};if(controller.signal.aborted)return;
-    cache[cacheKey]={text:parsed.text,at:Date.now()};
-    const keys=Object.keys(cache).sort((a,b)=>cache[b].at-cache[a].at).slice(0,400);
-    await chrome.storage.local.set({[CACHE]:Object.fromEntries(keys.map(k=>[k,cache[k]]))});
-   });await cacheWrite.catch(()=>{});
+   if(!controller.signal.aborted)await learningStore.cacheSet("ai:"+cacheKey,{text:parsed.text,at:Date.now()},()=>!controller.signal.aborted).catch(()=>{});
   }
   if(controller.signal.aborted)throw new DOMException("已停止","AbortError");
   return {ok:true,text:parsed.text,warning:parsed.warning,fromCache:false};

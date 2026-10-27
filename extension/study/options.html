@@ -1,46 +1,83 @@
 <!doctype html>
-<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>字幕助手 · 设置</title><link rel="stylesheet" href="options.css">
-<main><small>字幕助手</small><h1>设置</h1>
-<section><h2>字幕与文字接口</h2>
-<p class="note">先选择视频原语言；字幕面板可为当前视频单独切换日语或英语。</p>
-<p class="note">每个视频默认关闭字幕。点击播放器内“开启字幕”后只显示原文；再开启“双语字幕”才持续翻译当前及下一句。</p>
-<p class="note">本地识别、离线词典和跟读不需要文字接口 Key。</p>
-<label>默认原语言<select id="defaultSourceLanguage"><option value="ja">日语</option><option value="en">英语</option></select></label>
-<label>本地识别模型<select id="asrModel"><option value="small">Whisper small · 较快</option><option value="medium">Whisper medium</option><option value="large-v3-turbo" disabled>Whisper large-v3-turbo · 需安装</option></select></label>
-<div class="grid"><label>OpenAI 兼容 Base URL<input id="baseUrl" type="url" placeholder="https://api.deepseek.com"></label><label>模型名<input id="model" placeholder="deepseek-v4-flash"></label></div>
-<label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空保持已保存的 Key"></label>
-<p class="note">Key 仅存本浏览器。诊断不会包含 Key、服务地址、字幕原文或完整接口响应。</p>
-<label>接口兼容方式<select id="compatibility"><option value="auto">自动 · DeepSeek 直连使用非思考模式</option><option value="standard">标准 OpenAI 兼容 · 不发送厂商专用字段</option><option value="deepseek">DeepSeek 协议 · 非思考模式（适用于兼容代理）</option></select></label>
-<div class="row"><button id="save" class="primary">保存设置</button><button id="health">检查本地识别服务</button><button id="diagnostics">导出讲解诊断</button></div><p id="status" role="status"></p>
-</section>
-<section><h2>字幕外观</h2>
-<label>字号模式<select id="subtitleSizeMode"><option value="auto">跟随播放器大小（默认）</option><option value="manual">手动设置</option></select></label><p id="appearanceModeHint" class="note">字号随播放器实际大小调整；手动字号会保留。</p>
-<div class="grid"><label>字号<input id="subtitleSize" type="range" min="16" max="52" value="32"></label><label>字号数值<input id="subtitleSizeNumber" type="number" min="16" max="52" value="32"></label></div>
-<div class="row"><button data-subtitle-color="#ffffff">白色</button><button data-subtitle-color="#ffe595">浅黄</button><button data-subtitle-color="#b9e6cf">浅绿</button><label>自定义颜色<input id="subtitleColor" type="color" value="#ffffff"></label><button id="appearanceReset">恢复默认</button></div>
-<p id="appearancePreviewLabel" class="note">自动模式预览（示意）</p><div class="appearance-preview"><span id="appearancePreview"><ruby>日本語<rt>にほんご</rt></ruby>を聞いてみましょう。</span></div><p id="appearanceStatus" class="note" role="status">保存后立即应用于已打开的视频；中文与注音会协调缩放。</p>
-</section>
-<section><h2>本地模型与服务</h2>
-<p id="modelService" role="status">正在检查连接…</p><p id="serviceSharing" class="note"></p>
-<p id="managerUpgrade" class="note" hidden></p>
-<div class="row"><button id="managerRefresh">刷新状态</button><button id="managerStart">启动服务</button><button id="managerStop" disabled>停止服务</button><button id="managerRestart" hidden>应用模型并重启</button><button id="managerHandover" hidden>首次接管现有服务</button></div>
-<div id="connectionHelp"><p class="note">首次使用请运行配套包的 Install-Connection.cmd，将此扩展 ID 粘贴进去。连接仅对当前 Windows 用户生效，之后可在本页操作。</p><p><code id="extensionId"></code> <button id="copyExtensionId">复制 ID</button></p></div>
-<p class="note">新模型保存位置：<span id="modelDirectory">连接后显示</span></p><button id="managerDirectory">选择以后下载的位置</button>
-<div class="row"><button id="managerCatalog">联网检查可用模型</button><button id="managerImport">导入已有模型目录</button><select id="modelFilter" aria-label="模型显示范围"><option value="ja">日语可用</option><option value="en">英语可用</option><option value="all">全部兼容目录</option><option value="installed">已安装</option></select></div><p id="catalogState" class="note" role="status">随包基础目录 · 尚未联网检查</p>
-<div id="models" class="catalog"></div><progress id="modelProgress" max="100" hidden></progress><button id="managerCancel" hidden>取消下载</button><p id="downloadState" role="status"></p><p id="managerNote" role="status"></p>
-<details id="legacyDefaultSection" hidden><summary>原启动方式默认模型</summary><p class="note">如果要删除原来默认的模型，先在这里明确切换。修改前会备份原设置，不重启服务。</p><div class="row"><select id="legacyDefault" aria-label="原启动方式默认"></select><button id="managerLegacyDefault">更新原启动方式默认</button></div></details>
-<p class="note">联网检查只读取官方兼容目录和文件元数据，点击下载才获取权重并校验。模型大小不是准确率排名，也不代表当前硬件一定能运行。已有模型原位复用；只能选择已确认支持当前原语言的模型。打开设置不会转写视频或调用付费接口。</p>
-</section>
-<section><h2>离线词典</h2><p class="note">按词条语言选择默认词典。多个词典可同时安装；下载、更新和删除只作用于选中的词典。整句翻译仍使用上方文字接口。</p>
-<div class="grid"><label>查词语言<select id="dictLanguage"><option value="ja">日语</option><option value="en">英语</option><option value="ko">韩语 · 暂未提供词典</option></select></label><label><span id="defaultLabel">日语默认词典</span><select id="dictDefault" disabled><option value="">尚未安装</option></select></label></div>
-<div id="dictionaryList" class="catalog" aria-label="可用词典"></div><p id="unsupportedLanguage" class="note" hidden>本版尚未接入可下载安装的韩语词典。</p>
-<article id="dictionaryCard" class="dictionary"><header><div><h3 id="dictName"></h3><span id="dictLanguagePair" class="badge"></span></div><strong id="dictState">读取状态…</strong></header>
-<p id="dictSize"></p><p id="dictQuality" class="note"></p><p id="dictVersion" class="note"></p>
-<p class="note"><a id="dictSource" target="_blank" rel="noreferrer">资源来源</a> · <a id="dictLicense" target="_blank" rel="noreferrer"></a></p>
-<div class="row"><button id="dictInstall" class="primary" disabled>下载安装</button><button id="dictUpdate" disabled>检查更新</button><button id="dictDelete" disabled>删除所选词典</button><button id="dictCancel" hidden>取消安装</button></div>
-<progress id="dictProgress" max="100" value="0" hidden></progress><p id="dictStatus" role="status"></p>
-<details><summary>归属与存储</summary><pre id="dictAttribution"></pre><p class="note">下载后先核对 SHA256，再分批写入浏览器数据库。安装取消、失败或关闭设置页时，原词典仍可使用。词典不会执行 HTML、图片或脚本。删除大型词典可能需要几十秒，请等到完成。</p></details></article>
-<div class="installed"><h3>已安装</h3><div id="installedDictionaries"></div></div>
-<div class="lookup"><h3>离线查询 · 使用当前语言的默认词典</h3><div class="row"><input id="lookupText" placeholder="日语原形或读音，如 食べる"><button id="lookup">查询</button></div><div id="lookupResult" role="status"></div></div>
-<details class="manual"><summary>补充导入日语中文释义 JSON</summary><p class="note">保留旧版日语补充词表。此入口仅用于日语，以词典原形为键，值为中文或 {reading, meaning}。最多4 MB；导入后替换已有自定义词表，不影响上方下载的词典。</p><div class="row"><button id="dictImport">选择 JSON 文件</button><button id="dictExample">下载格式示例</button></div><input id="dictFile" type="file" accept=".json" hidden><p id="manualStatus" role="status"></p></details>
-</section></main><script src="options.js"></script></html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>字幕助手 · 设置</title><link rel="stylesheet" href="options.css"></head>
+<body>
+<a class="skip-link" href="#settingsContent">跳到设置内容</a>
+<div class="settings-shell">
+  <aside class="settings-sidebar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">字</span><span>字幕助手</span></div><h1>设置</h1>
+    <nav aria-label="设置分类">
+      <a href="#subtitles" data-settings-page="subtitles" aria-current="page"><span aria-hidden="true">Aa</span>字幕与外观</a>
+      <a href="#recognition" data-settings-page="recognition"><span aria-hidden="true">◉</span>语音识别</a>
+      <a href="#translation" data-settings-page="translation"><span aria-hidden="true">译</span>翻译与讲解</a>
+      <a href="#dictionaries" data-settings-page="dictionaries"><span aria-hidden="true">辞</span>离线词典</a>
+      <a href="#storage" data-settings-page="storage"><span aria-hidden="true">▤</span>资料与缓存</a>
+    </nav>
+  </aside>
+  <main id="settingsContent" tabindex="-1">
+    <section id="subtitles" class="settings-page" aria-labelledby="subtitlesTitle">
+      <header class="page-header"><div><p class="eyebrow">观看偏好</p><h2 id="subtitlesTitle">字幕与外观</h2><p>语言、字号和颜色，调整为适合你的样子。</p></div><span class="save-hint">更改后自动保存</span></header>
+      <div class="surface">
+        <div class="setting-row"><div><label for="defaultSourceLanguage">视频默认语言</label><p class="note">单个视频仍可在字幕面板切换语言。</p></div><select id="defaultSourceLanguage"><option value="ja">日语</option><option value="en">英语</option></select></div>
+        <p id="languageStatus" class="feedback" role="status"></p><div class="quiet-note">每个视频由你手动开启字幕；需要中文时，再开启双语字幕。</div>
+      </div>
+      <div class="surface appearance-section">
+        <div class="section-heading"><h3>字幕样式</h3><button id="appearanceReset" class="text-button">恢复默认</button></div>
+        <div class="appearance-preview"><span id="appearancePreview"><ruby>日本語<rt>にほんご</rt></ruby>を聞いてみましょう。</span><span class="preview-translation">试着听听日语吧。</span></div>
+        <p id="appearancePreviewLabel" class="note preview-label">自动模式预览（示意）</p>
+        <div class="setting-row"><label for="subtitleSizeMode">字号</label><select id="subtitleSizeMode"><option value="auto">跟随播放器大小</option><option value="manual">手动设置</option></select></div>
+        <p id="appearanceModeHint" class="note">随播放器大小调整，窗口与全屏均适用。</p>
+        <div id="manualSizeControls" class="size-controls" hidden><label class="sr-only" for="subtitleSize">手动字号滑块</label><input id="subtitleSize" type="range" min="16" max="52" value="32"><label class="sr-only" for="subtitleSizeNumber">手动字号数值</label><input id="subtitleSizeNumber" type="number" min="16" max="52" value="32"><span>px</span></div>
+        <div class="setting-row color-row"><span id="colorLabel">文字颜色</span><div class="color-choices" role="group" aria-labelledby="colorLabel"><button data-subtitle-color="#ffffff" aria-pressed="true"><i class="swatch white" aria-hidden="true"></i>白色</button><button data-subtitle-color="#ffe595" aria-pressed="false"><i class="swatch yellow" aria-hidden="true"></i>浅黄</button><button data-subtitle-color="#b9e6cf" aria-pressed="false"><i class="swatch green" aria-hidden="true"></i>浅绿</button><label class="custom-color" for="subtitleColor"><input id="subtitleColor" type="color" value="#ffffff">自定义</label></div></div>
+        <p id="appearanceStatus" class="feedback" role="status">更改会立即应用到已打开的视频。</p>
+      </div>
+    </section>
+    <section id="recognition" class="settings-page" aria-labelledby="recognitionTitle" hidden>
+      <header class="page-header"><div><p class="eyebrow">本地运行</p><h2 id="recognitionTitle">语音识别</h2><p>没有原文字幕时，用电脑上的模型生成字幕。</p></div><button id="managerRefresh">刷新状态</button></header>
+      <div class="status-grid">
+        <article class="surface status-card"><div class="section-heading"><h3>管理器连接</h3><span id="managerConnection" class="status-badge" role="status">尚未检查</span></div><p id="managerConnectionDetail" class="note">连接后可管理模型和识别服务。</p><div id="connectionHelp" hidden><p>若已退出管理器，请运行 <b>outputs</b> 中的“恢复本地模型管理器连接”，再点“重新连接”。</p></div></article>
+        <article class="surface status-card"><div class="section-heading"><h3>语音识别服务</h3><span id="modelService" class="status-badge" role="status">状态未知</span></div><p id="serviceModel" class="note">连接管理器后查看运行状态。</p><p id="serviceSharing" class="note"></p><div class="row service-actions"><button id="managerStart" class="primary" disabled>启动识别服务</button><button id="managerStop" disabled hidden>停止服务</button><button id="managerRestart" disabled hidden>重新加载模型…</button><button id="managerHandover" disabled hidden>在此管理服务…</button></div></article>
+      </div>
+      <p id="managerUpgrade" class="notice" hidden></p><p id="managerNote" class="feedback" role="status"></p>
+      <div class="surface"><div class="setting-row"><div><label for="asrModel">识别使用的模型</label><p id="modelSelectionHint" class="note">更改后自动保存，下次识别使用。</p></div><select id="asrModel" disabled><option value="small">Whisper small</option><option value="medium">Whisper medium</option></select></div><p id="modelSelectionStatus" class="feedback" role="status"></p><p id="modelAvailability" class="notice" hidden></p></div>
+      <div class="surface">
+        <div class="section-heading"><h3>模型库 <span id="modelCount" class="count"></span></h3><button id="managerImport" disabled>导入已有模型</button></div>
+        <div class="catalog-toolbar"><label class="sr-only" for="modelFilter">模型显示范围</label><select id="modelFilter"><option value="installed">已安装</option><option value="ja">日语可用</option><option value="en">英语可用</option><option value="all">全部模型</option></select><button id="managerCatalog" disabled>更新可下载列表</button></div>
+        <p id="catalogState" class="note"></p><p id="modelEmpty" class="empty-state">连接后显示本地模型。</p><div id="models" class="catalog"></div>
+        <div class="download-progress"><progress id="modelProgress" aria-label="模型任务进度" max="100" hidden></progress><button id="managerCancel" hidden>取消任务</button><p id="downloadState" class="feedback" role="status"></p></div>
+        <details class="subsection"><summary>保存位置与原启动方式</summary><div class="storage-location"><div><span class="field-label">保存位置：</span><p id="modelDirectory" class="file-path">连接后显示</p></div><button id="managerDirectory" disabled>更改位置</button></div><p class="note">仅影响以后下载的模型，已有文件保留原位。</p>
+          <div id="legacyDefaultSection" hidden><hr><h4>原启动脚本的默认模型</h4><p class="note">仅影响通过原脚本启动的服务，与上方插件识别模型独立。修改会备份原设置，不重启服务。</p><div class="row"><label class="sr-only" for="legacyDefault">原启动脚本默认模型</label><select id="legacyDefault"></select><button id="managerLegacyDefault" disabled>保存启动默认</button></div></div>
+        </details>
+      </div>
+      <details id="connectionDetails" class="surface"><summary>连接帮助与详细信息</summary><p>首次连接：运行配套包中的 <code>Install-Connection.cmd</code>，填入下方扩展 ID，然后重新连接。</p><div class="extension-id"><code id="extensionId"></code><button id="copyExtensionId">复制 ID</button></div><p id="connectionVersion" class="note"></p><p id="connectionError" class="note"></p><p class="note">“退出本地模型管理器”只关闭管理连接，不等于停止语音识别服务。退出和恢复快捷方式均在 outputs 中。</p></details>
+    </section>
+    <section id="translation" class="settings-page" aria-labelledby="translationTitle" hidden>
+      <header class="page-header"><div><p class="eyebrow">按需使用</p><h2 id="translationTitle">翻译与讲解</h2><p>为双语字幕、句子讲解和校对连接文字接口。</p></div><span id="providerState" class="status-badge">尚未配置</span></header>
+      <div class="surface"><div class="section-heading"><h3>OpenAI 兼容接口</h3></div><p class="note">本地识别、离线查词和跟读录音无需配置。</p>
+        <div class="grid"><label for="baseUrl">服务地址（Base URL）<input id="baseUrl" type="url" spellcheck="false" autocomplete="off" placeholder="https://api.deepseek.com"></label><label for="model">模型名称<input id="model" spellcheck="false" autocomplete="off" placeholder="填写服务提供的模型名"></label></div>
+        <label for="apiKey">API Key</label><div class="key-field"><input id="apiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="填入 API Key"><button id="showApiKey" type="button" aria-pressed="false">显示</button></div><p id="keyHint" class="note">Key 仅保存在当前浏览器。</p>
+        <details class="subsection"><summary>接口兼容与诊断</summary><label for="compatibility">兼容方式<select id="compatibility"><option value="auto">自动识别（推荐）</option><option value="standard">标准 OpenAI 格式</option><option value="deepseek">DeepSeek 格式（关闭思考）</option></select></label><p class="note">使用代理且自动识别不适用时再修改。</p><div class="row"><button id="diagnostics">导出讲解诊断</button><button id="removeApiKey" class="danger" hidden>移除已保存的 Key…</button></div><p class="note">诊断不包含 Key、服务地址或字幕原文。</p></details>
+        <div class="form-footer"><button id="save" class="primary">保存接口</button><p id="status" class="feedback" role="status"></p></div>
+      </div>
+    </section>
+    <section id="dictionaries" class="settings-page" aria-labelledby="dictionariesTitle" hidden>
+      <header class="page-header"><div><p class="eyebrow">下载一次，离线可用</p><h2 id="dictionariesTitle">离线词典</h2><p>单击字幕中的单词，即可查看本地释义。</p></div></header>
+      <div class="surface"><div class="grid"><label for="dictLanguage">查词语言<select id="dictLanguage"><option value="ja">日语</option><option value="en">英语</option><option value="ko" disabled>韩语（暂无词典）</option></select></label><label for="dictDefault"><span id="defaultLabel">日语默认词典</span><select id="dictDefault" disabled><option value="">尚未安装</option></select></label></div>
+        <div id="dictionaryList" class="catalog" aria-label="可用词典"></div><p id="unsupportedLanguage" class="empty-state" hidden>暂无该语言的词典。</p>
+        <article id="dictionaryCard" class="dictionary"><header><div><h3 id="dictName"></h3><span id="dictLanguagePair" class="badge"></span></div><strong id="dictState">读取状态…</strong></header><p id="dictSize"></p><p id="dictQuality" class="note"></p>
+          <div class="row"><button id="dictInstall" class="primary" disabled>下载安装</button><button id="dictUpdate" disabled>检查更新</button><button id="dictDelete" class="danger" disabled>删除词典…</button><button id="dictCancel" hidden>取消安装</button></div>
+          <progress id="dictProgress" aria-label="词典安装进度" max="100" value="0" hidden></progress><p id="dictStatus" class="feedback" role="status"></p>
+          <details><summary>版本与来源</summary><p id="dictVersion" class="note"></p><p><a id="dictSource" target="_blank" rel="noreferrer">资源来源</a> · <a id="dictLicense" target="_blank" rel="noreferrer"></a></p><pre id="dictAttribution"></pre><p class="note">安装失败或取消时，原版本仍可使用。</p></details>
+        </article><details class="subsection"><summary>全部已安装词典</summary><div id="installedDictionaries" class="installed"></div></details>
+      </div>
+      <div class="surface lookup"><h3>试着查一个词</h3><div class="row"><label class="sr-only" for="lookupText">查询单词</label><input id="lookupText" placeholder="日语原形或读音，如 食べる" maxlength="100"><button id="lookup">查询</button></div><div id="lookupResult" role="status"></div></div>
+      <details class="surface manual"><summary>导入补充词表</summary><p class="note">导入日语中文释义 JSON（最多 4 MB），替换已有补充词表。已安装词典不受影响。</p><div class="row"><button id="dictImport">选择 JSON 文件</button><button id="dictExample">下载格式示例</button></div><input id="dictFile" type="file" accept=".json" hidden><p id="manualStatus" class="feedback" role="status"></p></details>
+    </section>
+    <section id="storage" class="settings-page" aria-labelledby="storageTitle" hidden>
+      <header class="page-header"><div><h2 id="storageTitle">资料与缓存</h2><p>收藏视频后，已取得的字幕与学习记录会长期保留。</p></div><button id="refreshCache">刷新占用</button></header>
+      <div class="surface"><h3>临时缓存</h3><p id="cacheUsage" role="status"></p><div class="setting-row"><label for="cacheBudget">容量上限（MiB）</label><input id="cacheBudget" type="number" min="1" max="256" step="1" value="16"></div><div class="row"><button id="saveCacheBudget">保存容量</button><button id="clearTemporary">清理临时缓存</button></div><p class="note">临时字幕窗口、未收藏视频的资料和文字结果共用限额，优先清理最久未使用的项目。已打开页面的字幕仍可继续使用。</p><p id="cacheFeedback" class="feedback" role="status"></p></div>
+      <div class="surface"><h3>已收藏视频资料</h3><p id="savedUsage"></p><p class="note">已收藏视频资料、句子收藏、生词、校对记录及复习状态不参与自动清理。旧版已导入的字幕保持原有保存方式。词典和模型不计入临时缓存。</p><div id="savedDocuments"></div></div>
+    </section>
+  </main>
+</div><script src="options.js"></script>
+</body></html>

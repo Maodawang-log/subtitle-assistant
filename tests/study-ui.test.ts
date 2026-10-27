@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";
@@ -28,7 +29,7 @@ function deferred<T>() {
   const promise = new Promise<T>((res) => { resolve = res; });
   return { promise, resolve };
 }
-async function flush() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
+async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }
 
 let video: HTMLVideoElement;
 let time: number;

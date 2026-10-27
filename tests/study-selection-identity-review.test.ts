@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";
@@ -16,7 +17,7 @@ vi.mock("../extension/study/bounded-asr.js", () => ({
   }, requestStudyAudioWindow: vi.fn()
 }));
 vi.mock("../extension/study/inline-recorder.js", () => ({
-  createInlineRecorder: () => ({ clear() {}, stop() {}, open() {} })
+  createInlineRecorder: () => ({ clear() {}, stop() {}, open() {}, show() {}, setCurrent() {} })
 }));
 
 const identity = "BV1ab411c7mD:111", url = "https://www.bilibili.com/video/BV1ab411c7mD/";
@@ -132,13 +133,13 @@ it("stops an active sentence loop when an empty replacement removes its last cue
   expect(find("loop").textContent).toBe("循环：关");
 });
 
-it("stops an obsolete loop when an overlap changes the surviving cue's time bounds", async () => {
+it("stops an obsolete loop when only unaligned sentence fragments would remain", async () => {
   await emit([cue(1, 12, "时间被后续窗口裁短的原句。")]);
   await click("loop");
   const before = find("current").dataset.cue;
   expect(find("loop").getAttribute("aria-pressed")).toBe("true");
   await emit([cue(4.5, 6.5, "覆盖中间区间的新句。")], 4, 5);
-  expect(textOfCurrent()).toBe("时间被后续窗口裁短的原句。");
+  expect(textOfCurrent()).toBe("覆盖中间区间的新句。");
   expect(find("current").dataset.cue).not.toBe(before);
   expect(find("loop").getAttribute("aria-pressed")).toBe("false");
 });

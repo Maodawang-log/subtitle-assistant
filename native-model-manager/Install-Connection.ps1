@@ -5,8 +5,6 @@ function Get-PackageHash([string]$path) {
  $stream=[IO.File]::OpenRead($path);$algorithm=[Security.Cryptography.SHA256]::Create()
  try { return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace('-','').ToLowerInvariant() } finally { $stream.Dispose();$algorithm.Dispose() }
 }
-if(!$ExtensionId.Count) { $ExtensionId=@((Read-Host '粘贴新版扩展设置页显示的扩展 ID')) }
-foreach($id in $ExtensionId) { if($id -notmatch '^[a-p]{32}$') { throw '扩展 ID 必须是设置页显示的 32 位字母，不是浏览器地址。' } }
 function Assert-LocalPath([string]$value) {
  if(!$value -or $value.StartsWith('\\') -or ![IO.Path]::IsPathRooted($value) -or $value.Split('\') -contains '..') { throw '请使用本机绝对路径。' }
  $resolved=[IO.Path]::GetFullPath($value).TrimEnd('\')
@@ -28,12 +26,17 @@ if($registered.Count -eq 1) {
  $InstallDirectory=$registeredHome
  if(!$PSBoundParameters.ContainsKey('LegacyBase')) { $LegacyBase=(Get-Content -LiteralPath (Join-Path $registeredHome 'host-config.json') -Raw -Encoding UTF8 | ConvertFrom-Json).legacyBase }
 }
-if(!$InstallDirectory) {$InstallDirectory='E:\Work\日语视频学习插件\local-asr\model-manager-1.2.0'}
+if(!$InstallDirectory) {$InstallDirectory='E:\Work\日语视频学习插件\local-asr\model-manager-1.2.1'}
 $destination=Assert-LocalPath $InstallDirectory
 $base=Assert-LocalPath $LegacyBase
 $python=Join-Path $base '.venv\Scripts\python.exe'
 if(!(Test-Path -LiteralPath $python)) { throw '没有找到已有本地识别环境；请检查 E 盘项目位置。' }
 $manifestPath=Join-Path $destination 'native-host.json'
+if(!$ExtensionId.Count -and $registeredManifest) {
+ $ExtensionId=@($registeredManifest.allowed_origins | Where-Object {$_ -match '^chrome-extension://[a-p]{32}/$'} | ForEach-Object {$_ -replace '^chrome-extension://','' -replace '/$',''})
+}
+if(!$ExtensionId.Count) { $ExtensionId=@((Read-Host '粘贴新版扩展设置页显示的扩展 ID')) }
+foreach($id in $ExtensionId) { if($id -notmatch '^[a-p]{32}$') { throw '扩展 ID 必须是设置页显示的 32 位字母，不是浏览器地址。' } }
 $origins=@($ExtensionId | ForEach-Object { "chrome-extension://$_/" })
 if($registeredManifest) {$origins=@($origins+@($registeredManifest.allowed_origins | Where-Object {$_ -match '^chrome-extension://[a-p]{32}/$'}) | Select-Object -Unique)}
 $manifest=@{name=$hostName;description='BiliScript local model manager';path=(Join-Path $destination 'native-host.exe');type='stdio';allowed_origins=$origins}
@@ -50,7 +53,7 @@ if(Test-Path -LiteralPath $destination) {
  }
 }
 $hashes=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package-hashes.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$packageNames=@('manager.py','catalog.py','model_files.py','host.py','Launcher.cs','model-catalog.json','service-provenance.json','Install-Connection.ps1','Uninstall-Connection.ps1','stop-owned-service.ps1','takeover-legacy.ps1','README.md','service/server.py','service/window_audio.py','native-host.exe','Install-Connection.cmd','Uninstall-Connection.cmd')
+$packageNames=@('manager.py','catalog.py','model_files.py','host.py','Launcher.cs','model-catalog.json','service-provenance.json','Install-Connection.ps1','Uninstall-Connection.ps1','stop-owned-service.ps1','takeover-legacy.ps1','README.md','service/server.py','service/window_audio.py', 'service/opening_repair.py','native-host.exe','Install-Connection.cmd','Uninstall-Connection.cmd')
 if(@($hashes.PSObject.Properties).Count -ne $packageNames.Count) {throw '安装包文件清单不完整。'}
 foreach($property in $hashes.PSObject.Properties) {
  if($property.Name -cnotin $packageNames -or $property.Value -notmatch '^[0-9a-f]{64}$') {throw '安装包包含未知文件或无效摘要。'}
@@ -60,8 +63,14 @@ foreach($property in $hashes.PSObject.Properties) {
 New-Item -ItemType Directory -Path $destination -Force | Out-Null
 if(Get-ChildItem -LiteralPath $destination -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw '安装目录内存在链接，未更新。' }
 $gate=$null
-try { $gate=[IO.File]::Open((Join-Path $destination 'manager.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) } catch { throw '请关闭设置页，在扩展管理页重新加载扩展，暂不打开设置，再运行升级；无需停止原识别服务。' }
+try { $gate=[IO.File]::Open((Join-Path $destination 'manager.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) } catch { throw '管理器连接仍被占用。请运行 outputs 中的“退出本地模型管理器”后再重试。' }
 try {
+# Do not replace the code that a live managed worker may import on its next job.
+$serviceRecordPath=Join-Path $destination 'managed-service.json'
+if(Test-Path -LiteralPath $serviceRecordPath) {
+ $serviceRecord=Get-Content -LiteralPath $serviceRecordPath -Raw -Encoding UTF8 | ConvertFrom-Json
+ if($serviceRecord.pid -and (Get-Process -Id $serviceRecord.pid -ErrorAction SilentlyContinue)) { throw '识别服务仍在运行，配套未更新。请等任务结束后停止服务，再运行此更新；程序不会自动停止服务。' }
+}
 if(Test-Path -LiteralPath (Join-Path $destination 'native-host.exe')) {
  try { $probe=[IO.File]::Open((Join-Path $destination 'native-host.exe'),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None);$probe.Dispose() } catch { throw '配套仍被浏览器占用，请关闭设置页并重新加载扩展后重试；原服务保持运行。' }
 }
@@ -99,5 +108,5 @@ foreach($path in $registryPaths) { New-Item -Path $path -Force | Out-Null;Set-It
  if($restoreErrors.Count){throw ('更新失败，部分文件需要从备份恢复：'+$codeBackup+'；'+($restoreErrors -join ', '))}
  throw ('更新失败，已恢复原配套和注册：'+$failure.Exception.Message)
 }
-Write-Host '1.2.0 连接完成。原管理状态、服务记录与模型保持不变。回到插件设置页点击“刷新状态”。'
+Write-Host '1.2.1 连接完成。原管理状态、服务记录与模型保持不变。回到插件设置页点击“刷新状态”。'
 } finally {if($gate) {$gate.Dispose()}}

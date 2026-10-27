@@ -1,0 +1,16 @@
+{
+  "description": "Synthetic model/service states for isolated settings-page browser validation. No actual model or provider request.",
+  "settings": {"sourceLanguage":"ja","asrModel":"medium","baseUrl":"https://fixture.invalid/v1","model":"fixture-model","apiKey":"fixture-not-a-real-key","compatibility":"standard","retainedPreference":true},
+  "status": {
+    "protocolVersion":3,"version":"1.2.0","directory":"E:\\Work\\日语视频学习插件\\local-asr\\models",
+    "defaultModel":"medium","legacyDefault":"small","legacyModels":["small","medium"],"canStop":false,"managedService":false,"starting":false,"catalog":{},"job":null,
+    "service":{"backend":{"model":"medium"},"window_languages":["ja","en"],"available_models":["small","medium"],"active":false,"queue":0},
+    "models":[
+      {"id":"small","name":"Whisper small","bytes":486224691,"installed":true,"japaneseSupported":true,"englishSupported":true,"language":"多语言（含日语）","positioning":"较小模型，速度优先。","path":"E:\\Work\\日语视频学习插件\\local-asr\\models\\faster-whisper-small","source":"https://example.invalid/small"},
+      {"id":"medium","name":"Whisper medium","bytes":1530606387,"installed":true,"japaneseSupported":true,"englishSupported":true,"language":"多语言（含日语）","positioning":"兼顾速度与识别效果，实际表现取决于音频。","path":"E:\\Work\\日语视频学习插件\\local-asr\\models\\faster-whisper-medium","source":"https://example.invalid/medium"},
+      {"id":"large-v3-turbo","name":"Whisper large-v3-turbo","bytes":1621622784,"installed":false,"japaneseSupported":true,"englishSupported":true,"language":"多语言（含日语）","positioning":"速度优先的裁剪版本，可能牺牲准确性。","source":"https://example.invalid/turbo"},
+      {"id":"tiny","name":"Whisper tiny","bytes":78223769,"installed":false,"japaneseSupported":true,"englishSupported":true,"language":"多语言（含日语）","positioning":"轻量，适合先试；实际效果取决于音频。","source":"https://example.invalid/tiny"},
+      {"id":"base.en","name":"Whisper base.en","bytes":147849216,"installed":true,"japaneseSupported":false,"englishSupported":true,"language":"仅英语","positioning":"英语专用模型，不适用于日语。","path":"E:\\Work\\已有模型\\用于窄屏换行验证的较长模型保存目录\\faster-whisper-base.en"}
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createWordPanel } from "../extension/study/word-panel.js";
 import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";
@@ -7,7 +8,7 @@ const word = (term: string) => ({ surface_form: term, basic_form: term, reading:
 const source = { sentence: "私たちの暮らしに広がる変化です。", url: "https://www.bilibili.com/video/BV1Qtnt6JEy8/?p=1", time: 12.7 };
 let storage: Map<string, unknown>, panel: ReturnType<typeof createWordPanel>, lookup: ReturnType<typeof vi.fn>;
 const $ = (id: string) => document.getElementById(id)!;
-async function flush() { for (let i = 0; i < 15; i++) await Promise.resolve(); }
+async function flush() { for (let i = 0; i < 100; i++) await Promise.resolve(); }
 function make(seed: unknown[] = []) {
   storage.set(key, seed);
   const area = createMemoryStorageArea(storage);

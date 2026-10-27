@@ -146,11 +146,17 @@ describe("natural windowed layout independent review", () => {
     element("micStart").click(); await flush();
     fullscreen = full; shell!.mount(video);
     expect(element("practice")).toBe(practice); expect(element("micAudio")).toBe(audio);
-    expect(practice.parentElement).toBe(element("learningControls"));
+    expect(practice.parentElement).toBe(element("practiceHome"));
     expect(track.stop).not.toHaveBeenCalled();
     expect(element<HTMLButtonElement>("micStop").disabled).toBe(false);
     element("micStop").click(); await flush();
     const savedUrl = audio.src;
+    shell!.setPane("subtitles"); shell!.mount(video);
+    expect(practice.parentElement).toBe(element("learningControls"));
+    expect(element("micAudio")).toBe(audio); expect(audio.src).toBe(savedUrl);
+    expect(element<HTMLButtonElement>("micSave").disabled).toBe(false);
+    shell!.setPane("practice"); shell!.mount(video);
+    expect(practice.parentElement).toBe(element("practiceHome")); expect(audio.src).toBe(savedUrl);
     fullscreen = null; shell!.mount(video);
     expect(element("practice")).toBe(practice); expect(element("micAudio")).toBe(audio);
     expect(practice.parentElement).toBe(element("practiceHome"));

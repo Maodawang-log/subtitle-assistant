@@ -50,13 +50,14 @@ describe("default source language options independent review", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("saves local defaults with all provider fields blank and retains the latest saved provider", async () => {
+  it("does not use the provider save button to overwrite local defaults or erase an existing provider", async () => {
     await mount();
     disk.set(key, { ...provider, model: "latest-other-page-model", retainedPreference: true });
     for (const id of ["baseUrl", "model", "apiKey"]) $<HTMLInputElement>(id).value = "";
     $<HTMLSelectElement>("asrModel").value = "medium"; $<HTMLSelectElement>("defaultSourceLanguage").value = "en";
     $("save").click(); await flush();
-    expect(disk.get(key)).toEqual({ ...provider, model: "latest-other-page-model", retainedPreference: true, asrModel: "medium", sourceLanguage: "en", autoStart: false, autoTranslate: false });
+    expect(disk.get(key)).toEqual({ ...provider, model: "latest-other-page-model", retainedPreference: true });
+    expect($("status").classList.contains("error")).toBe(true);
     expect(permission).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
   });
 

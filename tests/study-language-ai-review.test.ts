@@ -6,7 +6,7 @@ vi.mock("../extension/study/local-proxy.bg.js", () => ({}));
 vi.mock("../extension/study/native-source.bg.js", () => ({}));
 vi.mock("../extension/study/model-manager.bg.js", () => ({}));
 
-const SETTINGS = "biliscriptJapaneseSettings", CACHE = "biliscriptJapaneseAiCache", extensionId = "language-review";
+const SETTINGS = "biliscriptJapaneseSettings", CACHE = "biliscriptStudyTemporaryV2", extensionId = "language-review";
 const configuration = { baseUrl: "https://compatible.example/v1", model: "synthetic-model", apiKey: "fixture-not-a-real-key" };
 const text = "I am here.", context = "Before.\nI am here.\nAfter.";
 let disk: Map<string, unknown>, fetchMock: ReturnType<typeof vi.fn>, handle: any, counter: number;

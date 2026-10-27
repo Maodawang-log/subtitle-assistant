@@ -1,6 +1,18 @@
 import {it,expect,vi,afterEach} from "vitest";
 import {createStudyShell} from "../extension/study/ui-shell.js";
 let shell:ReturnType<typeof createStudyShell>|undefined;
+it("never injects an entry into native controls and preserves native CC through preview, enable, fullscreen and close",()=>{
+ vi.stubGlobal("chrome",{runtime:{getURL:(p:string)=>p}});
+ document.body.innerHTML='<main class="left-container"><div id="playerWrap"><div class="bpx-player-container"><video></video><div class="bpx-player-control-bottom-right"><button id="native-cc">CC</button><button class="bpx-player-ctrl-setting">设置</button></div></div></div></main>';
+ const video=document.querySelector('video')!,player=document.querySelector('.bpx-player-container')!,bar=document.querySelector('.bpx-player-control-bottom-right')!,cc=document.getElementById('native-cc')!;
+ const before=bar.innerHTML,clicked=vi.fn();cc.addEventListener('click',clicked);
+ let full:Element|null=null;Object.defineProperty(document,'fullscreenElement',{configurable:true,get:()=>full});
+ shell=createStudyShell();shell.mount(video);expect(shell.slot.style.getPropertyValue('display')).toBe('none');
+ for(const action of [()=>shell!.openPanel(),()=>shell!.setEnabled(true),()=>{full=player},()=>shell!.setEnabled(false),()=>{full=null}]){
+  action();shell.mount(video);expect(bar.innerHTML).toBe(before);expect(document.getElementById('native-cc')).toBe(cc);expect(document.getElementById('biliscript-study-entry')).toBeNull();expect(shell.$('show')).toBeNull();
+ }
+ cc.click();expect(clicked).toHaveBeenCalledOnce();expect(shell.$('enable')).not.toBeNull();
+});
 afterEach(()=>{shell?.destroy();document.body.replaceChildren();delete (document as any).fullscreenElement;vi.unstubAllGlobals();vi.restoreAllMocks()});
 it("does not insert study hosts or alter sidebar styles before server DOM hydration finishes",()=>{
  vi.stubGlobal("chrome",{runtime:{getURL:(p:string)=>p}});

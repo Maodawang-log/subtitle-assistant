@@ -1,3 +1,4 @@
+import "./helpers/study-learning-store-host.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeSourceLanguage, sourceLanguageName, isSourceTrack, tokenizeEnglish, importStorageKey } from "../extension/study/source-language.js";
 import { createJapaneseCcSource } from "../extension/study/cc-source.js";

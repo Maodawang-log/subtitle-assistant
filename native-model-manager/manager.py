@@ -194,7 +194,7 @@ class Manager:
             for model, latest in self.catalog.items():
                 item=installed.get(model, {});release=item.get('release', latest)
                 models.append({'id':model,'name':release['name'],'bytes':sum(f['bytes'] for f in release['files'].values()),'revision':release['revision'],'availableRevision':latest['revision'],'source':'https://huggingface.co/'+release['repo'] if release.get('repo') else '', 'language':release.get('language','语言未确认'),'japaneseSupported':release.get('japaneseSupported') is True,'englishSupported':release.get('englishSupported') is True,'positioning':release.get('positioning','已有兼容模型；实际速度与效果取决于设备和音频。'), **{key:value for key,value in item.items() if key!='release'},'installed':model in installed})
-            return {'version': '1.2.0', 'protocolVersion':3,'capabilities':['onlineCatalog','importModel','deletePreview','legacyDefault','sourceLanguage'], 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
+            return {'version': '1.2.1', 'protocolVersion':3,'capabilities':['onlineCatalog','importModel','deletePreview','legacyDefault','sourceLanguage'], 'directory': self.state['directory'], 'defaultModel': self.state.get('default_model', legacy.get('default_model', 'small')),
                     'legacyDefault':legacy.get('default_model','small'),'legacyModels':[key for key,item in installed.items() if key in self.base_catalog and Path(item['path'])==self.legacy/'models'/('faster-whisper-'+key)],
                     'catalog':{key:value for key,value in self.catalog_state.items() if key!='models'},'models':models,
                     'service': health, 'managedService': owned, 'canStop': stopping, 'starting': starting,

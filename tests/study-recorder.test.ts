@@ -44,3 +44,8 @@ it("reports denied microphone permission and allows retry without opening tabs",
  getUserMedia.mockRejectedValue(new DOMException("denied","NotAllowedError"));
  await click("micStart");expect($("practiceStatus").textContent).toContain("未获允许");expect($("micStart").disabled).toBe(false);
 });
+it('shows the current listening sentence without microphone access or discarding the existing recording',async()=>{
+ await click('micStart');await click('micStop');created[0].finish('kept');const url=$('micAudio').src;getUserMedia.mockClear();vi.mocked(URL.revokeObjectURL).mockClear();
+ recording.show({start:4,end:6,text:'第二句'});recording.setCurrent({start:7,end:9,text:'第三句'});
+ expect($('practice').hidden).toBe(false);expect($('practiceCue').textContent).toBe('第三句');expect($('micAudio').src).toBe(url);expect($('micSave').disabled).toBe(false);expect(getUserMedia).not.toHaveBeenCalled();expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+});

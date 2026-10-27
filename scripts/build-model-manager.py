@@ -7,7 +7,7 @@ source = root / 'native-model-manager'
 target = root / '.scratch/model-manager-package'
 target.mkdir(parents=True, exist_ok=True)
 assert target.resolve().is_relative_to((root / '.scratch').resolve())
-names = ['manager.py', 'catalog.py', 'model_files.py', 'host.py', 'Launcher.cs', 'model-catalog.json', 'service-provenance.json', 'Install-Connection.ps1', 'Uninstall-Connection.ps1', 'stop-owned-service.ps1', 'takeover-legacy.ps1', 'README.md', 'service/server.py', 'service/window_audio.py']
+names = ['manager.py', 'catalog.py', 'model_files.py', 'host.py', 'Launcher.cs', 'model-catalog.json', 'service-provenance.json', 'Install-Connection.ps1', 'Uninstall-Connection.ps1', 'stop-owned-service.ps1', 'takeover-legacy.ps1', 'README.md', 'service/server.py', 'service/window_audio.py', 'service/opening_repair.py']
 for name in names:
     dest=target/name;dest.parent.mkdir(parents=True,exist_ok=True)
     if name.endswith('.ps1'):

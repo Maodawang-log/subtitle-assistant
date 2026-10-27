@@ -1,3 +1,4 @@
+import { learningAction } from "./learning-store.js";
 import type { StudyAudioCue } from "./bounded-asr.js";
 import { repairAsrSegments } from "./cue-revisions.js";
 
@@ -8,6 +9,7 @@ export const STUDY_AUDIO_CACHE_STORAGE_KEY = "biliscript_japanese_study_audio_ca
 export interface StudyAudioCacheEntry {
   key: string;
   cues: StudyAudioCue[];
+  openingRepairVersion?: number;
 }
 
 export interface StudyAudioCacheStore {
@@ -34,7 +36,7 @@ function validatedEntry(raw: unknown): StudyAudioCacheEntry | undefined {
       || typeof cue.content !== "string" || !cue.content.trim() || cue.content.length > 4000) return;
     cues.push({ from: cue.from, to: cue.to, content: cue.content });
   }
-  return { key: value.key, cues:repairAsrSegments(cues) };
+  return { key: value.key, cues:repairAsrSegments(cues), ...((raw as StudyAudioCacheEntry).openingRepairVersion === 1 ? {openingRepairVersion:1} : {}) };
 }
 
 export function compactStudyAudioCache(entries:unknown[]):StudyAudioCacheEntry[]{
@@ -47,13 +49,12 @@ export function createChromeStudyAudioCache(limit = 64): StudyAudioCacheStore {
   const maxEntries = Math.max(2, Math.min(128, Math.floor(limit)));
   return {
     async read() {
-      const stored = await chrome.storage.local.get(STUDY_AUDIO_CACHE_STORAGE_KEY);
-      const entries = stored[STUDY_AUDIO_CACHE_STORAGE_KEY];
+      const entries = await learningAction("audioRead");
       if (!Array.isArray(entries)) return [];
       return compactStudyAudioCache(entries).slice(-maxEntries);
     },
     async write(entries) {
-      await chrome.storage.local.set({ [STUDY_AUDIO_CACHE_STORAGE_KEY]: compactStudyAudioCache(entries).slice(-maxEntries) });
+      await learningAction("audioWrite",{entries:compactStudyAudioCache(entries).slice(-maxEntries)});
     }
   };
 }
