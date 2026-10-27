@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { mkdir, readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, copyFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { createHash } from 'node:crypto';
 import { REPO_ROOT, launchBrowser, attachPage, createWorkerSession, screenshot, teardown, waitFor, sleep, writeEvidence, artifactDir, log } from './harness.mjs';
@@ -146,8 +146,9 @@ async function sidebarCheck(mode){
  check(mode+'-manual-scroll-after-reopen-does-not-snap-back',await page.cdp.evaluate(`${host}.querySelector('.pane:not([hidden]) .scroll').scrollTop===${moved}`));
 }
 async function importFixture(){
+ const file=path.join(out,'study-overall-import.srt');await copyFile(path.join(REPO_ROOT,'tests/fixtures/study-overall-import.txt'),file);
  const remote=await page.cdp.send('Runtime.evaluate',{expression:el('subtitleFile')});
- await page.cdp.send('DOM.setFileInputFiles',{files:[path.join(REPO_ROOT,'tests/fixtures/study-overall-import.srt')],objectId:remote.result.objectId});
+ await page.cdp.send('DOM.setFileInputFiles',{files:[file],objectId:remote.result.objectId});
  await waitFor('imported subtitle file',()=>page.cdp.evaluate(`${el('rows')}.textContent.includes('Imported complete document')`));
 }
 async function resetOverallFixture(){
