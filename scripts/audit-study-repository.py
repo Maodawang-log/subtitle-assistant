@@ -25,7 +25,7 @@ def main():
             for match in re.finditer(pattern,data):
                 item=dict(scope=scope,path=path,kind=kind,line=data[:match.start()].count(b'\n')+1)
                 (allowances if allowed(path,match[0]) else findings).append(item)
-    objects=subprocess.check_output(['git','rev-list','--objects','--all'],cwd=ROOT,text=True).splitlines()
+    objects=subprocess.check_output(['git','rev-list','--objects','--all'],cwd=ROOT,encoding='utf-8').splitlines()
     process=subprocess.Popen(['git','cat-file','--batch'],cwd=ROOT,stdin=subprocess.PIPE,stdout=subprocess.PIPE)
     for line in objects:
         oid,_,path=line.partition(' ');process.stdin.write((oid+'\n').encode());process.stdin.flush()
