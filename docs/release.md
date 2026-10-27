@@ -1,6 +1,6 @@
 # 发布包与恢复
 
-当前分支为 2.7.3 本地体验版，未上传 GitHub。使用 --skip-native 仅构建扩展，原安装由用户选择是否更新，服务无需停止。
+当前发行版本为 2.7.3.1，Windows 本地识别配套为 1.2.1。完整 Windows 包包含扩展、配套安装器与源码；不含 Python 环境、模型权重、Key 或个人数据。已安装配套 1.2.1 时只更新扩展，无需停止识别服务。
 
 扩展版本唯一来源为 package.json。修改版本及 CHANGELOG 后运行 pnpm install --frozen-lockfile、pnpm typecheck、pnpm test、python scripts/audit-study-repository.py。源码修改应提交后再正式打包，release.json 的 sourceCommit 与 sourceDirty 记录来源。
 
@@ -36,6 +36,6 @@ powershell.exe -NoProfile -File .\Update-Extension.ps1 -RestoreBackup "更新时
 
 ## 本地配套与数据
 
-扩展 2.7.0 至 2.7.3 继续使用管理器 1.2.1。已安装配套未变化时不用重装。确需更新配套时，按其 README 等共享任务结束，先停止识别再退出管理器连接。安装脚本不会替用户停止共享服务。
+扩展 2.7.0 至 2.7.3.1 继续使用管理器 1.2.1。已安装配套未变化时不用重装。确需更新配套时，按其 README 等共享任务结束，先停止识别再退出管理器连接。安装脚本不会替用户停止共享服务。
 
 工程清理必须保留实际注册的 Native Messaging 目录、Python 环境和模型、当前扩展加载目录、连接快捷方式及其目标。不要依据目录名称上的旧版本号判断它可以删除。先核实 Git 远端、发行包和最小恢复点，再删除独立旧包和隔离缓存。

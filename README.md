@@ -2,7 +2,9 @@
 
 在 B 站视频页按句学习日语和英语的 Edge / Chrome 扩展。手动开启后，优先使用所选原语言的 CC 字幕；没有可用字幕时，使用本机 Whisper 识别当前播放附近的音频。也可导入 SRT / VTT。
 
-本分支为 **2.7.3 本地体验版**，未上传发布；已发布正式版仍为 **2.7.0**。Windows 本地识别配套 **1.2.1**。本项目由 **Maodawang-log 二次开发和维护**，不是上游 BiliScript 的官方发行版。
+**项目作者 / 维护者：[Maodawang-log](https://github.com/Maodawang-log)**
+
+当前版本 **2.7.3.1**，Windows 本地识别配套 **1.2.1**。
 
 ## 功能
 
@@ -24,19 +26,19 @@
 
 ## 安装与使用
 
-1. 获取本仓库构建的 subtitle-assistant-2.7.2.1.zip，解压到固定目录；也可按下文从源码构建。
+1. 在 [Releases](https://github.com/Maodawang-log/subtitle-assistant/releases) 下载 `subtitle-assistant-2.7.3.1.zip`，解压到固定目录；也可按下文从源码构建。
 2. 打开 edge://extensions 或 chrome://extensions，开启开发者模式，“加载解压缩的扩展”选择发布包的 extension 目录（自行构建为 dist-study）。最低 Chromium 版本 120。
 3. 打开 B 站视频，通过浏览器工具栏图标打开字幕助手，选择原语言并点击“开启字幕”。无对应 CC 时需已运行的本地识别服务；也可导入字幕。
 4. 设置页填写文字服务的 Base URL、模型名和 API Key。支持 OpenAI 兼容聊天补全接口，例如自配 DeepSeek。没有 Key 仍可使用导入字幕、本地识别、词典、句控和录音。
 5. 模型和词典分别由用户发起下载 / 导入，安装扩展不会自动下载模型。
 
-不提供 Key，不承诺免费额度。当前通过解压包交付，不对应原项目的商店条目。
+文字服务由你自行配置，计费与数据政策由所选服务决定。
 
 ## 更新与回退
 
 **保留原扩展和加载路径，不要先卸载或换目录重新加载。** 浏览器设置、词典和学习记录属于原扩展 ID。
 
-发布包的 Update-Extension.ps1 先核对摘要、完整备份，再更新发布文件；不操作浏览器数据或本地服务。支持从 2.6.3.1–2.7.2 升级至本地补丁 2.7.2.1。在发布包根目录执行：
+关闭字幕学习后，运行发布包根目录的 `Update-Extension.cmd`，输入浏览器实际使用的原加载目录。工具支持从 2.6.3.1 起的学习版升级至 2.7.3.1，先核对摘要、完整备份，再更新扩展文件，保留原路径和扩展 ID。也可在 PowerShell 中执行：
 
 ```powershell
 powershell.exe -NoProfile -File .\Update-Extension.ps1 -ExistingDirectory "浏览器实际使用的原加载目录"
@@ -51,7 +53,7 @@ powershell.exe -NoProfile -File .\Update-Extension.ps1 -RestoreBackup "完整备
 
 配套通过 Native Messaging 连接浏览器，在 127.0.0.1:18766 提供本机识别。复用已有 Python 环境及 CTranslate2 / faster-whisper 模型，不把音频上传至文字 API。当前是已有 Windows 本地 ASR 环境的配套，**不是从零安装 Python、CUDA 或权重的一键安装器**。
 
-完整正式包内 native-model-manager 提供源码、启动器与安装入口；2.7.2 本地体验包只更新扩展，配套目录仅保留说明。已有注册沿用原绝对目录、模型、设置和扩展 ID；目录名仍是 model-manager-1.0.0 不代表代码过旧，不必移动。新环境要求 LegacyBase 下已有 .venv/Scripts/python.exe 及识别依赖，参数见 [配套说明](native-model-manager/README.md)。
+完整 Windows 包内 `native-model-manager` 提供 1.2.1 源码、启动器与安装器，不包含 Python 环境、模型权重或个人配置。已有注册沿用原绝对目录、模型、设置和扩展 ID；原文件夹名称无需更换。新环境要求 LegacyBase 下已有 `.venv/Scripts/python.exe` 及识别依赖，参数见 [配套说明](native-model-manager/README.md)。
 
 仅需更新配套时：等待共享任务结束 → 在设置中停止识别服务 → 退出管理器连接 → 安装配套 → 恢复连接 → 启动服务。**退出管理器连接不等于停止识别服务。** 已有 1.2.1 未变化时只更新扩展。不要在酒馆等软件使用共享服务时强行覆盖或停止它。
 
@@ -63,6 +65,12 @@ powershell.exe -NoProfile -File .\Update-Extension.ps1 -RestoreBackup "完整备
 - 翻译、讲解、AI 校对、总结、问答会将相关字幕及上下文发给你配置的文字服务。开启双语后按需请求翻译，计费和数据政策由供应商决定。
 - 本地识别服务读取经校验的当前音轨地址；模型 / 词典下载访问各自来源。详见 [隐私说明](PRIVACY.md)。
 
+## 二次开发与个性化
+
+欢迎 Fork 或克隆仓库，按自己的学习习惯修改界面、流程和功能。可以结合 **Codex、Kimi Code、ZCode、DeepSeek Harness** 等 AI 编程工具协作：说明需求和改动范围，阅读生成的修改，运行相关检查，再到真实视频中验证。
+
+例如，Anki 导出、更多练习形式或个人化布局都可以作为自行扩展的方向。欢迎提交 Issue 和 Pull Request，分享你的需求与改进；分发修改版时请保留 MIT 版权和第三方通知。
+
 ## 开发与验证
 
 需要 Node.js 22 或以上、pnpm 12；发布工具需 Python 3.11 或以上。Windows 完整配套构建使用系统 .NET Framework C# 编译器。依赖由 pnpm-lock.yaml 固定。
@@ -71,13 +79,15 @@ powershell.exe -NoProfile -File .\Update-Extension.ps1 -RestoreBackup "完整备
 pnpm install --frozen-lockfile
 pnpm build
 pnpm typecheck
-pnpm test
+# 按改动选择相关测试，例如查词与讲解：
+pnpm exec vitest run tests/study-merged-explanation.test.ts tests/study-word-fold-root-review.test.ts
 python scripts/audit-study-repository.py
 python scripts/package-study-release.py
-python scripts/test-study-release.py
 ```
 
-package.json 是扩展版本的唯一来源。构建输出 dist-study，发行包输出 release/subtitle-assistant-<版本> 和同名 ZIP，含摘要清单、升级工具、许可证。非 Windows 可加 --skip-native 构建仅扩展包。浏览器验证：node scripts/browser-harness/study-learning-audit.mjs study-release，需本机 Edge，使用隔离模拟数据；不代表真实视频、麦克风或付费接口完整验收。
+package.json 是扩展版本的唯一来源。构建输出 dist-study，发行包输出 release/subtitle-assistant-<版本> 和同名 ZIP，含摘要清单、升级工具、许可证。非 Windows 可加 --skip-native 构建仅扩展包。
+
+真实 DOM、布局和浏览器交互检查使用 [浏览器验证工具](scripts/browser-harness/README.md)。模拟数据检查之外，还需在真实 B 站页面确认字幕与时间轴、句控和导入；涉及本地识别、麦克风或文字 API 的改动，应使用自己的环境分别验证。模拟检查通过不代表这些真实路径已验收。
 
 extension/study 为学习功能，其他 extension 模块保留上游共享实现与回归测试；native-model-manager 为独立配套；scripts 为构建、升级和检查；tests 为离线夹具。上游入口仅通过 build:upstream 构建，不进入默认学习版。模型、运行环境、个人学习数据、profile、缓存、发行包不提交 Git。
 
@@ -87,8 +97,8 @@ extension/study 为学习功能，其他 extension 模块保留上游共享实�
 
 Whisper 对人名、噪声、重叠语音或句首可能出错；开头补识别是有条件的一次重试，不保证补齐。AI 校对、释义和总结需对照原声。精听不能移除视频画面烧录字幕。问答依据字幕，不分析画面、不联网搜索事实。录音对照不等于发音评测。
 
-## 来源与许可证
+## 来源与致谢
 
-原始作者 [haixiong1997](https://github.com/haixiong1997)，原项目 [Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper)。本学习版直接基于 [Edmund724/BiliScript](https://github.com/Edmund724/BiliScript)，基线 e40ebd1152c13df8df293ee5d7bd42d673ec241e。原 README 注明 UI 参考 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest)。**Maodawang-log 是本分支的二次开发 / 维护者，原作者署名及历史保留。**
+感谢 [haixiong1997/Bilibili-Obsidian-Clipper](https://github.com/haixiong1997/Bilibili-Obsidian-Clipper) 和 [Edmund724/BiliScript](https://github.com/Edmund724/BiliScript) 的工作；原 UI 参考 [zarazhangrui/youtube-digest](https://github.com/zarazhangrui/youtube-digest)。
 
-[MIT LICENSE](LICENSE) 保留 Copyright (c) 2026 haixiong1997 原文。第三方通知见 [NOTICE](NOTICE.md)；[上游 README 归档](docs/upstream/README.BiliScript.md) 中的功能、商店和服务信息是历史资料，不作为本版本操作说明。
+项目采用 [MIT 许可证](LICENSE)。完整来源基线与第三方通知见 [NOTICE](NOTICE.md)，原 Git 历史和 [上游 README 归档](docs/upstream/README.BiliScript.md) 保留。

@@ -1,6 +1,6 @@
 # 来源及第三方通知
 
-字幕助手由 Maodawang-log 二次开发与维护，不主张成为原项目作者。
+字幕助手当前项目作者 / 维护者：Maodawang-log。
 
 - 原始项目：haixiong1997/Bilibili-Obsidian-Clipper，https://github.com/haixiong1997/Bilibili-Obsidian-Clipper 。MIT 原版权 Copyright (c) 2026 haixiong1997，根目录 LICENSE 原文保留。
 - 直接基础：Edmund724/BiliScript，https://github.com/Edmund724/BiliScript ，基线 e40ebd1152c13df8df293ee5d7bd42d673ec241e。保留原 Git 历史、共享模块和 README 归档。
