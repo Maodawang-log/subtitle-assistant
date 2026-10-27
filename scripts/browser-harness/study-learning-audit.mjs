@@ -94,10 +94,22 @@ async function installWorkerFixtures(handle) {
   await handle.cdp.evaluate(actionBundle+`;globalThis.__entryAuditController?.dispose();globalThis.__entryAuditController=StudyActionAudit.installStudyActionEntry({runtime:chrome.runtime,tabs:chrome.tabs,action:{onClicked:{addListener:fn=>globalThis.__clickStudyIcon=fn,removeListener:()=>{}},setBadgeText:args=>chrome.action.setBadgeText(args),setTitle:args=>chrome.action.setTitle(args)}});`,{sessionId:handle.sessionId});
   await handle.cdp.evaluate(`(()=>{
     if(globalThis.__languageAudit)return;const audit=globalThis.__languageAudit={ai:[],native:[],nativeBlocked:0,holdNext:0};
+    const layout=${JSON.stringify(process.argv.includes('--interaction-layout-only')?fixture.interactionLayout:null)};
     chrome.runtime.connectNative=()=>{audit.nativeBlocked++;throw new Error('Native management blocked by isolated audit')};
     const scripting=chrome.scripting.executeScript.bind(chrome.scripting);chrome.scripting.executeScript=async options=>{const result=await scripting(options);if(String(options.func).includes('NO_MARKER'))audit.native.push(result[0]?.result);return result};
     const original=fetch;globalThis.fetch=async(url,init)=>{
-     if(String(url).startsWith('https://api.deepseek.com/')){const body=JSON.parse(init.body),input=JSON.parse(body.messages.at(-1).content),item={text:input.text,input,system:body.messages[0].content,finished:false};audit.ai.push(item);const hold=audit.holdNext;audit.holdNext=0;if(hold)await new Promise(r=>setTimeout(r,hold));item.finished=true;if(audit.failNextTranslation&&body.messages[0].content.includes('只返回译文')){audit.failNextTranslation=false;return new Response(JSON.stringify({error:{message:'fixture translation failure'}}),{status:400,headers:{'Content-Type':'application/json'}})}return new Response(JSON.stringify({choices:[{message:{content:input.evidence?JSON.stringify(body.messages[0].content.includes('items:')?{items:input.evidence.map(c=>({id:c.id,status:'suggested',text:'Corrected: '+c.text}))}:{supported:!input.question?.includes('画面'),blocks:input.question?.includes('画面')?[]:[{text:'夹具中文概述与回答',refs:[input.evidence[0].id]}],chapters:input.question?[]:[{text:'夹具章节',refs:[input.evidence[0].id]}],learning:input.question?[]:[{text:'夹具表达与语法',refs:[input.evidence[0].id]}]}):body.messages[0].content.includes('只返回译文')?'夹具中文译文：'+input.text:'## Fixture explanation\\nSelected: '+input.text},finish_reason:'stop'}],usage:{completion_tokens:20}}),{headers:{'Content-Type':'application/json'}})}return original(url,init)};
+     if(String(url).startsWith('https://api.deepseek.com/')){
+      const body=JSON.parse(init.body),input=JSON.parse(body.messages.at(-1).content),item={text:input.text,input,system:body.messages[0].content,finished:false};audit.ai.push(item);
+      const hold=audit.holdNext;audit.holdNext=0;if(hold)await new Promise(r=>setTimeout(r,hold));item.finished=true;
+      if(audit.failNextTranslation&&body.messages[0].content.includes('只返回译文')){audit.failNextTranslation=false;return new Response(JSON.stringify({error:{message:'fixture translation failure'}}),{status:400,headers:{'Content-Type':'application/json'}})}
+      let content;
+      if(input.evidence){
+       const supported=!input.question?.includes('画面');
+       const blocks=!supported?[]:layout&&!input.question?layout.overviewParagraphs.map((text,i)=>({text,refs:[input.evidence[Math.min(i,input.evidence.length-1)].id]})):[{text:layout&&input.question?layout.chatMarkdown:'夹具中文概述与回答',refs:[input.evidence[0].id]}];
+       content=JSON.stringify(body.messages[0].content.includes('items:')?{items:input.evidence.map(c=>({id:c.id,status:'suggested',text:'Corrected: '+c.text}))}:{supported,blocks,chapters:input.question?[]:[{text:'夹具章节',refs:[input.evidence[0].id]}],learning:input.question?[]:[{text:'夹具表达与语法',refs:[input.evidence[0].id]}]});
+      }else content=body.messages[0].content.includes('只返回译文')?'夹具中文译文：'+input.text:layout?layout.explanationMarkdown:'## Fixture explanation\\nSelected: '+input.text;
+      return new Response(JSON.stringify({choices:[{message:{content},finish_reason:'stop'}],usage:{completion_tokens:20}}),{headers:{'Content-Type':'application/json'}})
+     }return original(url,init)};
     return {nativeBlocked:typeof chrome.runtime.connectNative==='function'};
   })()`, { sessionId: handle.sessionId });
 }
@@ -126,6 +138,50 @@ async function drag(root, first, last) {
   await page.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...points.a, button: 'left', clickCount: 1 });
   for (let i = 1; i <= 16; i++) { await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: points.a.x + (points.b.x - points.a.x) * i / 16, y: points.a.y + (points.b.y - points.a.y) * i / 16, buttons: 1 }); await sleep(15); }
   await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...points.b, button: 'left', clickCount: 1 }); await sleep(180);
+}
+async function interactionLayout(){
+ const tab=name=>`${host}.querySelector('[data-pane=${name}]')`;
+ const word=term=>`[...${el('rows')}.querySelectorAll('.token')].find(n=>n.querySelector('ruby')?.firstChild.textContent===${JSON.stringify(term)})`;
+ check('six-learning-tabs',await page.cdp.evaluate(`JSON.stringify([...${host}.querySelectorAll('[data-pane]')].map(n=>n.textContent))===JSON.stringify(['字幕','视频','讲解','AI 对话','生词本','跟读'])&&!${el('pane-vocabulary')}`));
+ const opening=await activity();for(const name of ['explanation','chat'])await click(tab(name));
+ check('opening-explanation-and-chat-does-not-call-AI-or-ASR',sameActivity(opening,await activity()));
+ await click(tab('subtitles'));await click(word('language'));
+ await waitFor('local dictionary card',()=>page.cdp.evaluate(`${el('wordDetail')}.textContent.includes('英语夹具：语言')`));
+ check('local-hit-stays-in-merged-view-with-zero-AI',await pane()==='explanation'&&(await activity()).ai===opening.ai&&await page.cdp.evaluate(`${el('explainOriginal')}.textContent==='language'&&!!${el('wordDetail')}.querySelector('.word-star')`));
+ await click(`${el('wordDetail')}.querySelector('.word-toggle')`);check('individual-word-fold-still-works',await page.cdp.evaluate(`${el('wordDetail')}.querySelector('.word-body').hidden`));
+ await click(`${el('wordDetail')}.querySelector('.word-toggle')`);await shot('interaction-01-local-word');
+ await click(tab('subtitles'));const miss=(await audit()).ai.length;await click(word('Hello'));
+ await waitFor('one missing-word AI answer',async()=> (await audit()).ai.length===miss+1&&await page.cdp.evaluate(`!!${el('wordDetail')}.querySelector('strong')`));
+ check('explicit-dictionary-miss-calls-one-contextual-word-AI',(await audit()).ai.at(-1).input.text==='Hello'&&(await audit()).ai.at(-1).input.context.includes(fixture.englishText));
+ await click(tab('subtitles'));const dragBefore=(await audit()).ai.length;await drag(`${el('rows')}.querySelector('[data-study-text]')`,"don't",'study');
+ await waitFor('drag explanation and dictionary list',()=>page.cdp.evaluate(`${el('explainOriginal')}.textContent===${JSON.stringify(fixture.firstSelection)}&&!!${el('detail')}.querySelector('strong')&&${el('wordDetail')}.querySelectorAll('.word-card').length>=4`));
+ check('drag-has-one-AI-request-and-local-word-list',(await audit()).ai.length===dragBefore+1&&await pane()==='explanation');await shot('interaction-02-selection-normal');
+ for(const id of ['explain','paragraph']){const before=(await audit()).ai.length;await click(el(id));await waitFor(id+' answer',async()=> (await audit()).ai.length===before+1&&await page.cdp.evaluate(`${el('detail')}.textContent.includes('模拟讲解')`));check(id+'-renders-in-the-shared-view',await pane()==='explanation'&&await page.cdp.evaluate(`${el('explainOriginal')}.textContent.includes('Hello')&&${el('wordDetail')}.hidden`))}
+ await click(tab('chat'));
+ for(const [i,question] of fixture.interactionLayout.chatQuestions.entries()){
+  await click(el('chatQuestion'));await page.cdp.send('Input.insertText',{text:question});await click(el('chatSend'));
+  await waitFor('saved chat '+i,()=>page.cdp.evaluate(`${el('videoConversation')}.querySelectorAll('.chat-turn:not(.pending-turn)').length===${i+1}&&${el('chatStop')}.hidden`));
+ }
+ check('chat-renders-Markdown-and-keeps-real-citation-controls',await page.cdp.evaluate(`!!${el('videoConversation')}.querySelector('h3')&&!!${el('videoConversation')}.querySelector('strong')&&!!${el('videoConversation')}.querySelector('li')&&!!${el('videoConversation')}.querySelector('.evidence-line button')`));
+ check('follow-up-reuses-current-video-history',(await audit()).ai.at(-1).input.history.length===1);
+ await click(`${el('videoConversation')}.querySelector('details summary')`);await page.cdp.evaluate('document.querySelector("video").currentTime=40');await click(`${el('videoConversation')}.querySelector('.evidence-line button')`);
+ check('chat-citation-plays-the-genuine-cue-time',await page.cdp.evaluate('document.querySelector("video").currentTime<2&&!document.querySelector("video").paused'));await page.cdp.evaluate('document.querySelector("video").pause()');await click(tab('chat'));
+ const geometry=async label=>{
+  const read=()=>page.cdp.evaluate(`(()=>{const p=${el('pane-chat')},m=${el('videoConversation')},f=p.querySelector('.chat-footer'),u=m.querySelector('.chat-msg-user'),a=m.querySelector('.chat-msg-assistant'),style=getComputedStyle(m),rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,w:r.width,h:r.height,right:r.right,bottom:r.bottom}};return {pane:rect(p),messages:rect(m),footer:rect(f),user:rect(u),assistant:rect(a),scrollWidth:m.scrollWidth,width:m.clientWidth,contentWidth:m.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight),scrollHeight:m.scrollHeight,height:m.clientHeight,turnRight:u.parentElement.getBoundingClientRect().right}})()`);
+  await page.cdp.evaluate(`${el('videoConversation')}.scrollTop=0`);const top=await read();await page.cdp.evaluate(`${el('videoConversation')}.scrollTop=${el('videoConversation')}.scrollHeight`);const bottom=await read();
+  check(label+'-right-question-full-width-answer-and-fixed-input',top.pane.w>=280&&Math.abs(top.user.right-top.turnRight)<2&&top.assistant.w>=top.contentWidth-1&&top.scrollWidth<=top.width+1&&top.scrollHeight>top.height&&top.footer.bottom<=top.pane.bottom+1&&top.messages.bottom<=top.footer.y+1&&Math.abs(top.footer.y-bottom.footer.y)<1,top);
+  (evidence.interactionGeometry||={})[label]=top;await page.cdp.evaluate(`${el('videoConversation')}.scrollTop=0`);await shot('interaction-chat-'+label);
+ };
+ await geometry('normal');
+ await page.cdp.send('Runtime.evaluate',{expression:"document.querySelector('.bpx-player-container').requestFullscreen()",userGesture:true,awaitPromise:true});await waitFor('fullscreen layout',()=>page.cdp.evaluate(`!!document.fullscreenElement&&document.getElementById('biliscript-japanese-study').hasAttribute('data-fullscreen')`));await sleep(280);
+ await geometry('fullscreen');await click(tab('explanation'));await shot('interaction-explanation-fullscreen');
+ await page.cdp.send('Runtime.evaluate',{expression:'document.exitFullscreen()',awaitPromise:true});await waitFor('normal layout restored',()=>page.cdp.evaluate('!document.fullscreenElement'));await page.cdp.evaluate("document.querySelector('.right-container').style.width='300px';window.dispatchEvent(new Event('resize'))");await sleep(300);
+ await click(tab('chat'));await geometry('narrow');await click(tab('explanation'));await shot('interaction-explanation-narrow');
+ await click(tab('video'));check('video-has-only-the-three-requested-groups',await page.cdp.evaluate(`JSON.stringify([...${el('pane-video')}.querySelectorAll('.learning-section>summary')].map(n=>n.textContent))===JSON.stringify(['总结与章节','校对记录','视频与句子收藏'])&&!${el('pane-video')}.contains(${el('videoConversation')})`));
+ await click(el('summaryGenerate'));await waitFor('fixture legacy overview',()=>page.cdp.evaluate(`${el('videoSummary')}.textContent.includes('第二段模拟概述')&&${el('learningStop')}.hidden`));
+ check('legacy-overview-is-one-paragraph-with-all-citations-and-chapter-kept',await page.cdp.evaluate(`(()=>{const cards=[...${el('videoSummary')}.children],overview=cards.filter(n=>!n.classList.contains('chapter-card'));return overview.length===1&&overview[0].querySelectorAll(':scope>p').length===1&&overview[0].querySelectorAll('.evidence-line').length===2&&${el('videoSummary')}.querySelectorAll('.chapter-card').length===1})()`));await shot('interaction-video-overview');
+ const beforeExport=await activity(),notes=await downloadClick('exportNotes','md');check('offline-notes-still-include-chat-and-one-overview-paragraph',fixture.interactionLayout.chatQuestions.every(q=>notes.includes(q))&&notes.includes(fixture.interactionLayout.overviewParagraphs.map(s=>s.replace(/\s+/g,' ')).join(' '))&&sameActivity(beforeExport,await activity()));
+ check('focused-interactions-have-no-page-errors-ASR-or-native-management',evidence.exceptions.length===0&&traffic.asr.length===0&&(await audit()).nativeBlocked===0,evidence.exceptions);
 }
 async function downloadClick(id,extension){
  const folder=path.join(downloads,String((evidence.downloads?.length||0)+1));await mkdir(folder,{recursive:true});
@@ -181,6 +237,7 @@ try {
   check('starts-passively-without-AI-or-ASR',!await enabled()&&(await activity()).ai===0&&traffic.asr.length===0);
   await openFromToolbar();await choose(el('sourceLanguage'),'en');await click(el('enable'));
   await waitFor('CC subtitle rows',()=>page.cdp.evaluate(`${el('rows')}.querySelectorAll('.cue').length===2`));
+  if(process.argv.includes('--interaction-layout-only')){await interactionLayout();break scenario}
   const widths=await page.cdp.evaluate(`(()=>{const a=${el('rows')}.querySelector('.cue-manual').getBoundingClientRect(),b=${el('rows')}.querySelector('.cue-proofread').getBoundingClientRect();return [a.width,b.width]})()`);
   check('manual-and-AI-buttons-equal-width',widths[0]===widths[1]&&widths[0]>=60,widths);
   check('top-buttons-use-complete-labels-and-batch-follows-follow',await page.cdp.evaluate(`${el('import')}.textContent==='导入字幕'&&${el('export')}.textContent==='导出字幕'&&${el('follow')}.nextElementSibling.id==='batchAll'`));

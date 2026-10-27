@@ -9,6 +9,13 @@
   "firstSelection": "don't rush—we study",
   "lateSelection": "we study language",
   "legacyWord": { "term": "language", "reading": "", "meaning": "Legacy Japanese-language entry", "at": 1 },
+  "interactionLayout": {
+    "description": "Synthetic Markdown and legacy overview blocks for the focused 2.7.3 interaction/layout check.",
+    "explanationMarkdown": "# 词义与用法\n\n这是**模拟讲解**，用于检查当前选词与原句的展示。\n\n- 保留原文和词义。\n- 结合上下文理解用法。",
+    "chatQuestions": ["视频建议怎样学习？", "请结合原句再解释一下。"],
+    "chatMarkdown": "## 核心观点\n\n视频建议**先理解原句，再逐步练习**。这是一份浏览器检查用的模拟回答，用来观察正文换行、段落间距和引用的位置。\n\n### 可以怎样做\n\n- 先听当前句，确定自己已经听懂的部分。\n- 查看单词释义和讲解，把新的表达放回上下文。\n- 回听引用的原句，再按自己的需要进行练习。\n\n### 结合字幕理解\n\n字幕中的建议围绕学习展开。回答保留对应原句，点击下方时间可以回到有依据的位置。追问会沿用当前视频的问答记录。\n\n这段较长的模拟文字用于核对滚动区域：阅读正文时，输入区域应始终保持在侧栏底部；文字应自然换行，标题、加粗和列表应有清楚的层次。",
+    "overviewParagraphs": ["第一段模拟概述。\n\n其中的补充说明也要保留。", "第二段模拟概述，说明后续字幕的内容。"]
+  },
   "dictionaryTerms": [
     { "term": "language", "reading": "ˈlæŋɡwɪdʒ", "meaning": "英语夹具：语言" },
     { "term": "study", "reading": "ˈstʌdi", "meaning": "英语夹具：学习" },

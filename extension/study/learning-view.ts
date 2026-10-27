@@ -38,9 +38,11 @@ export function learningView(snapshot: LearningSnapshot) {
  const supported = snapshot.result?.supported === true;
  const chapters = supported ? read(snapshot.result.chapters).sort((a,b) => a.cues[0].start-b.cues[0].start) : [];
  const blocks = supported ? read(snapshot.result.blocks) : [];
+ const overviewBlocks=blocks.filter(b => !chapters.some(c => c.text.trim() === b.text.trim() && citationIdentity(c) === citationIdentity(b)));
+ const overview=overviewBlocks.length?[{text:overviewBlocks.map(b=>b.text.replace(/\s+/g,' ').trim()).join(' '),cues:[...new Map(overviewBlocks.flatMap(b=>b.cues).map(c=>[c.id,c])).values()].sort((a,b)=>a.start-b.start)}]:[];
  return {
   supported, blocks,
-  overview: blocks.filter(b => !chapters.some(c => c.text.trim() === b.text.trim() && citationIdentity(c) === citationIdentity(b))),
+  overview,
   chapters: chapters.map((c,i) => ({...c, title:c.title || `章节 ${i+1}`}))
  };
 }

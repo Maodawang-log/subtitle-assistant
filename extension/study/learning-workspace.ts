@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { renderMarkdown } from '../ui/markdown.js';
 import { learningAction } from './learning-store.js';
 import { cueFingerprint, materialFingerprint, materialCoverage, evidenceCues, splitEvidence, digest, timeLabel } from './learning-data.js';
 import { boundedHistory, scopeStillCurrent } from './learning-guards.js';
@@ -28,9 +29,9 @@ export function createLearningWorkspace(ui,adapter){
  const capture=()=>{const m=material();if(!m?.cues.length)throw new Error('请先开启字幕并取得字幕资料');return structuredClone(m)};
  const valid=(token)=>job===token&&!token.controller.signal.aborted&&epoch===token.epoch&&adapter.binding()===token.binding&&adapter.configuration()===token.configuration;
  function cancel(reason='已停止；已取得的字幕和成功分段缓存保留。'){
-  if(job){job.controller.abort();if(job.phase==='committing')reason='校对已进入统一保存阶段；完成后可在校对记录整批撤销。';job=null;epoch++;void chrome.runtime.sendMessage({type:'study-learning-stop'});adapter.cancelCollection();status(reason)}renderBusy();
+  if(job){job.controller.abort();if(job.phase==='committing')reason='校对已进入统一保存阶段；完成后可在校对记录整批撤销。';job=null;epoch++;void chrome.runtime.sendMessage({type:'study-learning-stop'});adapter.cancelCollection();status(reason)}$('videoConversation').querySelectorAll('.pending-turn').forEach(item=>item.remove());renderBusy();
  }
- function renderBusy(){const busy=!!job;for(const b of ui.shadow.querySelectorAll('.cue-manual,.cue-proofread'))b.disabled=job?.phase==='committing';$('learningStop').hidden=!busy;$('batchStop').hidden=!busy;$('learningStop').disabled=job?.phase==='committing';$('batchStop').disabled=job?.phase==='committing';for(const id of ['summaryGenerate','chatSend','batchAll'])$(id).disabled=busy;}
+ function renderBusy(){const busy=!!job;for(const b of ui.shadow.querySelectorAll('.cue-manual,.cue-proofread'))b.disabled=job?.phase==='committing';$('learningStop').hidden=!busy;$('chatStop').hidden=!busy;$('chatStop').disabled=job?.phase==='committing';$('batchStop').hidden=!busy;$('learningStop').disabled=job?.phase==='committing';$('batchStop').disabled=job?.phase==='committing';for(const id of ['summaryGenerate','chatSend','batchAll'])$(id).disabled=busy;}
  async function begin(label,fn){if(job)return;const token={epoch:++epoch,binding:adapter.binding(),configuration:adapter.configuration(),controller:new AbortController()};job=token;renderBusy();status(label);try{await load();checked(token);await fn(token)}catch(e){if(valid(token))status(e.name==='AbortError'?'已停止。':e.message,e.name!=='AbortError')}finally{if(job===token){job=null;renderBusy()}}}
  const checked=token=>{if(!valid(token))throw new DOMException('资料已更新，任务已停止','AbortError')};
  async function request(kind,evidence,m,token,extra={}){
@@ -65,23 +66,27 @@ export function createLearningWorkspace(ui,adapter){
   const summary=$('videoSummary');summary.replaceChildren();$('summaryScope').textContent=record.summary?.material?summaryScopeText(record.summary):'';
   if(record.summary?.material){
    const snapshot=record.summary,view=learningView(snapshot);
-   const extra=node('details',undefined,'overview-extra');extra.append(node('summary','展开其余概述'));
-   view.overview.forEach((block,i)=>(i<2?summary:extra).append(renderBlock(block,snapshot.material)));
-   if(view.overview.length>2)summary.append(extra);
+   for(const block of view.overview)summary.append(renderBlock(block,snapshot.material));
    for(const chapter of view.chapters)summary.append(renderBlock(chapter,snapshot.material,{chapter:true}));
    if(!summary.childNodes.length)summary.append(node('p','现有字幕未提供足够依据生成总结。','empty'));
   }else{
    summary.append(node('p','点击“生成整体总结”，先准备全片资料，再生成概述与章节。','empty'));
   }
-  const target=$('videoConversation');target.replaceChildren();
+  const target=$('videoConversation'),oldScroll=target.scrollTop,atBottom=target.scrollHeight-target.clientHeight-oldScroll<48;target.replaceChildren();
   for(const turn of record.conversation||[]){
-   const item=node('article',undefined,'chat-turn');item.append(node('h3',turn.question),node('p','先前结果：字幕或接口已更新；出处保留生成时的原句。','notice chat-stale'));
+   const item=node('article',undefined,'chat-turn');item.append(node('div',turn.question,'chat-msg chat-msg-user'));
+   const answer=node('div',undefined,'chat-msg chat-msg-assistant');answer.append(node('p','先前结果：字幕或接口已更新；出处保留生成时的原句。','notice chat-stale'));
    const view=learningView(turn);
-   if(!view.supported)item.append(node('p','现有字幕未提供足够依据，无法回答。'));
-   else for(const block of view.blocks)item.append(renderBlock(block,turn.material));
-   target.append(item);
+   if(!view.supported)answer.append(node('p','现有字幕未提供足够依据，无法回答。'));
+   else for(const block of view.blocks){
+    const body=node('div',undefined,'chat-msg-assistant-body markdown');body.innerHTML=renderMarkdown(block.text);answer.append(body);
+    const details=node('details');details.append(node('summary','原句与出处'));for(const c of block.cues)details.append(cite(c,turn.material));answer.append(details);
+   }
+   item.append(answer);target.append(item);
   }
-  if(!target.childNodes.length)target.append(node('p','输入问题，依据已取得字幕提问。','empty'));
+  if(!target.childNodes.length)target.append(node('p','围绕已取得的字幕提问，回答会保留原句出处。','empty'));
+  target.scrollTop=atBottom?target.scrollHeight:oldScroll;
+
   updateStale(fingerprint);
  }
  async function analyze(m,token,question=''){
@@ -132,11 +137,13 @@ export function createLearningWorkspace(ui,adapter){
  });
  $('chatSend').onclick=()=>begin('准备回答…',async token=>{
   const question=$('chatQuestion').value.trim();if(!question)throw new Error('请输入围绕本视频的问题');
-  const m=capture(),result=await analyze(m,token,question);checked(token);
-  await commitRecord(m,{...record,conversation:[...(record.conversation||[]),{...result,question}]},token);$('chatQuestion').value='';status('回答已保存到本视频记录。');
+  const m=capture(),pending=node('article',undefined,'chat-turn pending-turn');pending.append(node('div',question,'chat-msg chat-msg-user'),node('p','正在依据字幕回答…','chat-msg chat-msg-assistant hint'));$('videoConversation').append(pending);$('videoConversation').scrollTop=$('videoConversation').scrollHeight;
+  try{const result=await analyze(m,token,question);checked(token);
+   await commitRecord(m,{...record,conversation:[...(record.conversation||[]),{...result,question}]},token);$('chatQuestion').value='';status('回答已保存到本视频记录。');
+  }finally{pending.remove()}
  });
  $('chatQuestion').onkeydown=e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'&&!e.isComposing){e.preventDefault();$('chatSend').click()}};
- $('learningStop').onclick=()=>cancel();$('batchStop').onclick=()=>cancel('已停止全部校对，字幕未改动。');
+ $('learningStop').onclick=()=>cancel();$('chatStop').onclick=()=>cancel();$('batchStop').onclick=()=>cancel('已停止全部校对，字幕未改动。');
  $('bookmarkVideo').onclick=async()=>{
   const owner=adapter.binding(),wasSaved=pinned,m=material(),b={...adapter.meta(),kind:'video'},control=$('bookmarkVideo');control.disabled=true;
   try{
@@ -183,7 +190,7 @@ export function createLearningWorkspace(ui,adapter){
   if(job&&!options.batchOwn&&((job.kind==='overall'&&job.phase==='analyzing'&&job.materialStamp!==materialFingerprint(material()))||(!options.collection&&(!job.scope||!scopeStillCurrent(job.scope,material()?.cues||[])))))cancel('字幕资料或设置已更新，旧任务已停止；需要时手动重试。');
   listening.sync();refresh();clearTimeout(saveTimer);const m=material();if(m?.cues.length&&!restoring){const snapshot=structuredClone(m);void learningAction('snapshot',{document:snapshot}).catch(e=>status('字幕仍在本页，但缓存保存失败：'+e.message))}
  }
- return {load,changed,refresh,saveSentence,
+ return {load,changed,refresh,saveSentence,showChat(){if(ui.pane==='chat')$('videoConversation').scrollTop=$('videoConversation').scrollHeight},
   sentenceButton:(c,m=material())=>favorites.sentenceButton(c,m,true),
   storageChanged:favorites.storageChanged,refreshFavorites:favorites.refresh,
   selected:listening.sync,bilingualDisabled:listening.clearChinese,

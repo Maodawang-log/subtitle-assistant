@@ -127,3 +127,27 @@
 :host([data-fullscreen]) .chapter-card{background:#203329}
 
 #importScopeDialog{max-width:min(460px,calc(100vw - 48px));border:1px solid var(--line);border-radius:12px;padding:20px;background:#fbfdfb;color:#24382d;font:14px/1.7 system-ui}#importScopeDialog::backdrop{background:#0b201a88}#importScopeDialog h3{margin:0 0 12px;font-size:17px}
+
+/* Message layout adapted from extension/entry/styles/reader-chat.css (BiliScript/MIT).
+   Reuse its message/input structure and the shared ui/markdown renderer, with study theme colors. */
+.study-chat:not([hidden]){display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.study-chat .chat-messages{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:18px;padding:16px}
+.study-chat .chat-turn{display:flex;flex-direction:column;gap:14px;min-width:0;padding:0;border:0}
+.study-chat .chat-msg{max-width:94%;white-space:pre-wrap;overflow-wrap:anywhere;padding:9px 14px;border-radius:22px;line-height:1.7;font-size:15px}
+.study-chat .chat-msg-user{align-self:flex-end;background:#edf4ed;color:#243e2d;border:1px solid var(--line)}
+.study-chat .chat-msg-assistant{align-self:stretch;width:100%;max-width:100%;background:transparent;border:0;border-radius:0;padding:0;white-space:normal;box-shadow:none}
+.study-chat .chat-msg-assistant-body{min-width:0;width:100%;background:transparent;border-radius:0;padding:0;line-height:1.8}
+.study-chat .chat-msg-assistant-body h1{font-size:21px}.study-chat .chat-msg-assistant-body h2{font-size:20px}.study-chat .chat-msg-assistant-body h3{font-size:18px}
+.study-chat .chat-msg-assistant-body h1,.study-chat .chat-msg-assistant-body h2,.study-chat .chat-msg-assistant-body h3{margin:14px 0 7px;line-height:1.45}
+.study-chat .chat-msg-assistant-body p{margin:0 0 12px}.study-chat .chat-msg-assistant-body p:last-child{margin-bottom:0}
+.study-chat .chat-msg-assistant-body ul,.study-chat .chat-msg-assistant-body ol{padding-left:22px;margin:6px 0 14px}
+.study-chat .chat-msg-assistant-body li{margin:4px 0}.study-chat .chat-msg-assistant details{margin:9px 0 0;font-size:13px}
+.study-chat .chat-footer{flex:none;padding:12px 16px 14px;border-top:1px solid var(--line);background:#fff}
+.study-chat .chat-input-card{border:1px solid var(--line);border-radius:14px;padding:9px 10px;background:#fbfdfb}
+.study-chat #chatQuestion{min-height:64px;max-height:150px;resize:vertical;width:100%;margin:0;padding:3px;border:0;background:transparent;outline-offset:3px}
+.study-chat .chat-input-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.study-chat .chat-input-bar .hint{flex:1;min-width:100px;font-size:12px}
+.chat-input-label{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.explanation-original{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid var(--line);border-radius:10px;background:#f6faf6;margin:0 0 14px;font-size:16px;line-height:1.8}
+#explanationResults>#detail{padding:0;margin-bottom:12px}#wordListTitle{font-size:15px;margin:18px 0 10px}.source-badge,.lookup-source{font-size:12px;color:var(--muted);font-weight:400}.lookup-source{display:block;margin:6px 0}
+:host([data-fullscreen]) .study-chat .chat-msg-user{background:#2a4533;color:#edf4ed}:host([data-fullscreen]) .study-chat .chat-footer,:host([data-fullscreen]) .study-chat .chat-input-card{background:#1a2e22}
+:host([data-fullscreen]) .explanation-original{background:#203329;color:#edf4ed}:host([data-fullscreen]) .study-chat .chat-msg-assistant{color:#edf4ed}

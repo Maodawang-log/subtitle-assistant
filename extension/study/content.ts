@@ -34,14 +34,14 @@ import { renderMarkdown } from "../ui/markdown.js";
  let scopeWaiting=false,nativeRefreshPending=false,lastNativeCheck=0,lookupEpoch=0,followRows=true;
  const currentElement=$("current"),chineseElement=$("chinese");
  const binding=()=>generation+"|"+sourceLanguage+"|"+(identity||route);
- const wordPanel=createWordPanel(ui,{binding,language:()=>sourceLanguage,lookup:(queries,language)=>send({type:"study-dictionary-lookup",language,queries}),fallback:(lemma,surface)=>words[lemma]||words[surface]||basic[lemma]||basic[surface],error:e=>status(e.message,true),explain:(token,source)=>safe(()=>{if(!source||source.resource!==(identity||route)||source.language!==sourceLanguage)return;const index=cues.findIndex(c=>c.text===source.sentence&&Math.abs(c.start+offset-source.time)<.01);if(index>=0)return explainSelection({text:token.surface_form,index,first:cueKey(cues[index])},binding(),"word")})});
+ const wordPanel=createWordPanel(ui,{binding,language:()=>sourceLanguage,lookup:(queries,language)=>send({type:"study-dictionary-lookup",language,queries}),fallback:(lemma,surface)=>words[lemma]||words[surface]||basic[lemma]||basic[surface],error:e=>status(e.message,true),explain:(token,source,valid)=>requestWordExplanation(token,source,valid)});
  const selection=createSubtitleSelection({binding,onDrag:()=>video?.pause(),onSelect:(value,source)=>safe(()=>explainSelection(value,source))});
  selection.bind($("rows"));
  const sourceFor=c=>({...videoMeta(),language:sourceLanguage,sentence:c.text,url:location.href,time:Math.max(0,c.start+offset),resource:identity||route});
  const recorder=createInlineRecorder(ui,async c=>{guard();loopOff();await player.play(c)},()=>{loopOff();video?.pause()});
  const proofreader=createProofreader(ui,{cues:()=>cues,binding,configuration:()=>configurationEpoch,pause:()=>{loopOff();video?.pause()},cancel:()=>send({type:"study-stop-ai",channel:"proofread"}).catch(()=>{}),listen:c=>safe(async()=>{guard();loopOff();await player.play(shifted(c))}),
   request:async snapshot=>{const result=await requestAI("proofread",snapshot.cue.text,0,"sentence","proofread",{cue:snapshot.cue,context:snapshot.context,resource:route+"|"+identity});if(!result)throw new Error("校对已取消，字幕未修改。");return result},edit:editCue});
- host.addEventListener("study-pane",event=>{if(event.detail==="video"){void workspace?.load().catch(e=>status(e.message,true));workspace?.refresh();return}if(event.detail==="practice")safe(()=>{const c=guard();loopOff();video.pause();recorder.show(shifted(c));workspace?.selected();ui.mount(video)});else recorder.stop()});
+ host.addEventListener("study-pane",event=>{if(event.detail==="video"||event.detail==="chat"){void workspace?.load().then(()=>{if(event.detail==="chat")workspace?.showChat()}).catch(e=>status(e.message,true));workspace?.refresh();return}if(event.detail==="practice")safe(()=>{const c=guard();loopOff();video.pause();recorder.show(shifted(c));workspace?.selected();ui.mount(video)});else recorder.stop()});
  host.addEventListener("study-layout",()=>updateOverlay(video?JSTUDY.at(cues,video.currentTime-offset):-1));
  const windowReady=time=>recognizedWindows.some(w=>time>=w.start&&time<w.end);
  const status=(text,error=false)=>{$("status").textContent=(error?"⚠ ":"")+text;$("status").title=text;$("status").classList.toggle("error",error)};
@@ -172,7 +172,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  function reset(next,preserveLanguage=false){
   if(!preserveLanguage){languageOverride=false;sourceLanguage=normalizeSourceLanguage(settings.sourceLanguage)}
   stop("已换视频，字幕默认关闭。");timeline.clear();invalidChinese.clear();route=next;identity="";clip=null;cues=[];chinese=[];selected=0;active=-1;offset=0;$("offset").value="0";translations.clear();attempted.clear();panelText="";
-  ui.setPane("subtitles");wordPanel.reset(true);$("detailTitle").textContent="本句讲解";$("explainScope").textContent="";$("detail").textContent="拖选字幕片段，或点击本句讲解。";
+  ui.setPane("subtitles");wordPanel.reset(true);$("detailTitle").textContent="讲解";$("explainScope").textContent="";$("explainOriginal").textContent="";$("explainOriginal").hidden=true;$("wordDetail").hidden=true;$("wordListTitle").hidden=true;$("detail").hidden=false;$("detail").textContent="点击单词、拖选片段，或使用本句讲解。";
   $("rows").replaceChildren(currentElement,chineseElement);currentElement.textContent="开启后显示"+languageName()+"字幕";chineseElement.textContent="";$("position").textContent="未载入";syncLanguageLabels();
 
  }
@@ -282,8 +282,26 @@ import { renderMarkdown } from "../ui/markdown.js";
   const mine=generation;try{const t=await getTokenizer();if(!enabled||mine!==generation||cues[index]!==c||!target.isConnected||selection.active)return;target.dataset.studyText="";target.dataset.cue=cueKey(c);target.dataset.index=String(index);target.replaceChildren(...t.tokenize(c.text).map(token=>tokenElement(token)));overlaySignature="";}
   catch(e){if(enabled&&mine===generation)status(e.message,true)}
  }
+ function openExplanation(title,original,origin=''){
+  const mine=++detailEpoch;aiBusy=false;proofreader.invalidate();wordPanel.reset(true);
+  for(const channel of ['selection','explanation'])send({type:'study-stop-ai',channel}).catch(()=>{});
+  ui.setPane('explanation');$('detailTitle').textContent=title;$('explainScope').textContent=origin;
+  $('explainOriginal').textContent=original;$('explainOriginal').hidden=!original;
+  $('detail').replaceChildren();$('detail').hidden=false;$('wordDetail').hidden=true;$('wordListTitle').hidden=true;return mine;
+ }
  async function lookup(token,element){
-  if(!enabled)return;video?.pause();ui.setPane("vocabulary");const index=Number(element?.closest("[data-study-text]")?.dataset.index??selected);await wordPanel.show([token],cues[index]?sourceFor(cues[index]):undefined);
+  if(!enabled)return;video?.pause();const index=Number(element?.closest('[data-study-text]')?.dataset.index??selected);
+  openExplanation('词义与变形',token.surface_form);$('detail').hidden=true;
+  await wordPanel.show([token],cues[index]?sourceFor(cues[index]):undefined,{autoExplain:true});
+ }
+ async function requestWordExplanation(token,source,valid){
+  const detail=detailEpoch,owner=binding(),live=()=>valid()&&detail===detailEpoch&&owner===binding();
+  if(!source||source.resource!==(identity||route)||source.language!==sourceLanguage||!live())return null;
+  const index=cues.findIndex(c=>c.text===source.sentence&&Math.abs(c.start+offset-source.time)<.01);if(index<0)return null;
+  const latest=await send({type:'study-settings-public'});if(!live())return null;settings={...settings,...latest?.config};
+  if(!settings.configured)throw new Error('尚未配置文字接口，请在设置中配置后重试。');
+  const result=await requestAI('word',token.surface_form,index,'selection','selection',{cue:{...cues[index]},context:JSTUDY.context(cues,index),resource:identity||route});
+  return live()?result:null;
  }
  function setupMessage(target,message){target.replaceChildren();const p=document.createElement("p"),button=document.createElement("button");p.textContent=message;button.textContent="去设置";button.className="setup-link";button.onclick=()=>send({type:"study-open-options"});target.append(p,button)}
  async function explainSelection(value,source,kind="explain"){
@@ -291,12 +309,11 @@ import { renderMarkdown } from "../ui/markdown.js";
   const index=value.index,c=cues[index];if(!c||cueKey(c)!==value.first)return;
   const snapshot={cue:{...c},context:JSTUDY.context(cues,index),resource:identity||route};
   proofreader.invalidate();
-  video?.pause();const mine=++detailEpoch;aiBusy=false;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});send({type:"study-stop-ai",channel:"explanation"}).catch(()=>{});
-  ui.setPane("explanation");$("detailTitle").textContent=kind==="word"?"词义与变形":"选段讲解";$("explainScope").textContent=value.text;$("detail").textContent="正在讲解选中片段…";
-  void getTokenizer().then(t=>{if(mine===detailEpoch&&source===binding())return wordPanel.show(t.tokenize(value.text),{...sourceFor(c),selection:value.text})}).catch(e=>status(e.message,true));
+  video?.pause();const mine=openExplanation(kind==="word"?"词义与变形":"选段讲解",value.text,"AI");$("detail").textContent="正在讲解选中片段…";$("wordListTitle").hidden=false;
+  void getTokenizer().then(t=>{if(mine===detailEpoch&&source===binding())return wordPanel.show(t.tokenize(value.text),{...sourceFor(c),selection:value.text},{autoExplain:false})}).catch(e=>status(e.message,true));
   const latest=await send({type:"study-settings-public"});if(mine!==detailEpoch||source!==binding())return;settings={...settings,...latest?.config};
   if(!settings.configured){setupMessage($("detail"),"尚未配置文字接口。单词释义已在本地准备。");status("请先在设置中配置文字接口。",true);return;}
-  try{const result=await requestAI(kind,value.text,index,"selection","selection",snapshot);if(!result||mine!==detailEpoch||source!==binding())return;$("detail").innerHTML=renderMarkdown(result.text);if(result.warning){const p=document.createElement("p");p.className="error";p.textContent=result.warning;$("detail").prepend(p)}status(result.warning||(result.fromCache?"已使用讲解缓存。":"讲解已完成。"),!!result.warning)}
+  try{const result=await requestAI(kind,value.text,index,"selection","selection",snapshot);if(!result||mine!==detailEpoch||source!==binding())return;$("detail").innerHTML=renderMarkdown(result.text);foldExplanation($("detail"));if(result.warning){const p=document.createElement("p");p.className="error";p.textContent=result.warning;$("detail").prepend(p)}status(result.warning||(result.fromCache?"已使用讲解缓存。":"讲解已完成。"),!!result.warning)}
   catch(e){if(mine===detailEpoch&&source===binding()){setupMessage($("detail"),e.message);status(e.message,true)}}
  }
  function updateOverlay(i){
@@ -324,8 +341,8 @@ import { renderMarkdown } from "../ui/markdown.js";
  }
  async function ask(kind,text,scope="sentence"){
   proofreader.invalidate();
-  const c=guard();if(aiBusy)return;if(kind!=="translate")video.pause();aiBusy=true;const detail=++detailEpoch;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});const mine=generation,index=selected;status("正在请求 "+(kind==="translate"?"中文翻译":"中文讲解")+"…");
-  if(kind==="explain"){ui.setPane("explanation");$("detailTitle").textContent=scope==="context"?"邻近几句讲解":"本句讲解";$("explainScope").textContent=scope==="context"?"当前句及前后各两句，最多五句":"只讲解当前选中句";$("detail").textContent="正在生成讲解…"}
+  const c=guard();if(aiBusy)return;if(kind!=="translate")video.pause();aiBusy=true;const detail=kind==="explain"?openExplanation(scope==="context"?"邻近几句讲解":"本句讲解",text||c.text,"AI"):++detailEpoch;aiBusy=true;send({type:"study-stop-ai",channel:"selection"}).catch(()=>{});const mine=generation,index=selected;status("正在请求 "+(kind==="translate"?"中文翻译":"中文讲解")+"…");
+  if(kind==="explain")$("detail").textContent="正在生成讲解…";
   try{
    const r=await requestAI(kind,text,index,scope);if(!r||detail!==detailEpoch)return;
    if(kind==="translate"){translations.set(cueKey(c),r.text);display(selected);overlaySignature=""}

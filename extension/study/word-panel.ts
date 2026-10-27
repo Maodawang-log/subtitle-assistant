@@ -2,6 +2,7 @@
 import { createVocabularyReview } from "./vocabulary-review.js";
 import { learningAction } from "./learning-store.js";
 import { normalizeSourceLanguage } from "./source-language.js";
+import { renderMarkdown } from "../ui/markdown.js";
 import { renderDictionaryResults } from "./dictionary-view.js";
 export function createWordPanel(ui, options) {
  const {$}=ui, key="biliscriptStudyVocabulary";let vocabulary=[],epoch=0,write=Promise.resolve(),expanded=true;
@@ -31,32 +32,43 @@ export function createWordPanel(ui, options) {
    target.append(card);
   }
  }
- async function show(tokens,source:any=undefined){
-  const mine=++epoch,binding=options.binding(),language=currentLanguage();$("wordDetail").replaceChildren();stars.clear();expanded=true;
+ async function show(tokens,source:any=undefined,preferences:any={}){
+  const mine=++epoch,binding=options.binding(),language=currentLanguage();$("wordDetail").hidden=false;$("wordDetail").replaceChildren();stars.clear();expanded=true;
   const tools=document.createElement("div");tools.className="word-collapse-tools";
   const setExpanded=(value)=>{expanded=value;for(const card of $("wordDetail").querySelectorAll(".word-card")){card.querySelector(".word-toggle").setAttribute("aria-expanded",String(value));card.querySelector(".word-body").hidden=!value}};
   for(const [label,value,cls] of [["全部展开",true,"word-expand-all"],["全部折叠",false,"word-collapse-all"]]){const button=document.createElement("button");button.className=cls;button.textContent=label;button.onclick=()=>setExpanded(value);tools.append(button)}$("wordDetail").append(tools);
   const unique=new Map();for(const token of tokens){if(token.pos==="記号"||!/[\p{L}\p{N}]/u.test(token.surface_form))continue;const term=token.basic_form&&token.basic_form!=="*"?token.basic_form:token.surface_form;if(!unique.has(term))unique.set(term,token)}
   for(const [lemma,token] of unique){
    if(mine!==epoch||binding!==options.binding())return;
-   const entry=language==="ja"?options.fallback(lemma,token.surface_form):undefined,card=document.createElement("article"),head=document.createElement("div"),title=document.createElement("h2"),star=document.createElement("button"),info=document.createElement("p"),meaning=document.createElement("div");
+   const entry=language==="ja"?options.fallback(lemma,token.surface_form):undefined,card=document.createElement("article"),head=document.createElement("div"),title=document.createElement("h2"),star=document.createElement("button"),info=document.createElement("p"),meaning=document.createElement("div"),origin=document.createElement("small");
    card.className="word-card";head.className="word-heading";title.textContent=token.surface_form;star.className="word-star";star.disabled=true;stars.add({term:lemma,language,button:star});
    info.className="word-reading";info.textContent=language==="ja"?[JSTUDY.hiragana(token.reading||entry?.reading||""),"原形："+lemma,token.pos,JSTUDY.conjugation(token)].filter(Boolean).join(" · "):"查词："+lemma;
-   meaning.className="word-meaning";meaning.textContent=entry?(typeof entry==="string"?entry:entry.meaning):"正在查本地词典…";
+   origin.className="lookup-source";origin.textContent="词典";meaning.className="word-meaning";meaning.textContent=entry?(typeof entry==="string"?entry:entry.meaning):"正在查本地词典…";
    const toggle=document.createElement("button"),body=document.createElement("div");toggle.className="word-toggle";toggle.setAttribute("aria-expanded",String(expanded));toggle.append(title);body.className="word-body";body.hidden=!expanded;
    toggle.onclick=()=>{body.hidden=!body.hidden;toggle.setAttribute("aria-expanded",String(!body.hidden))};
-   head.append(toggle,star);body.append(info,meaning);card.append(head,body);
-   if(options.explain){const explain=document.createElement("button");explain.className="word-explain";explain.textContent="AI 词义与变形";explain.onclick=()=>options.explain(token,source);body.append(explain)}
+   head.append(toggle,star);body.append(info,origin,meaning);card.append(head,body);
+
    $("wordDetail").append(card);updateStars();
    star.onclick=()=>{
     const existing=vocabulary.find(x=>sameWord(x,lemma,language)),item=existing||{term:lemma,language,reading:language==="ja"?JSTUDY.hiragana(token.reading):"",meaning:meaning.textContent,at:Date.now(),...(source?{source:{...source}}:{})};
     if(existing)vocabulary=vocabulary.filter(x=>!sameWord(x,lemma,language));else vocabulary=[item,...vocabulary];
     updateStars();renderBook();void persist(item,!existing).catch(options.error);
    };
-   try{const r=await options.lookup((language==="ja"?[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)]:[lemma,token.surface_form]).filter(Boolean),language);if(mine!==epoch||binding!==options.binding())return;
-    if(r?.ok&&r.entries?.length)renderDictionaryResults(meaning,r.entries);
-    else if(!entry)meaning.textContent=r?.ok?"当前词典未命中，可在设置中选择或安装词典。":r?.error||"本地词典暂不可用。";
-   }catch{if(mine===epoch&&!entry)meaning.textContent="词典查询未完成，请在设置中检查。"}
+   const live=()=>mine===epoch&&binding===options.binding();
+   try{
+    const r=await options.lookup((language==="ja"?[lemma,token.surface_form,token.reading,JSTUDY.hiragana(token.reading)]:[lemma,token.surface_form]).filter(Boolean),language);if(!live())return;
+    if(r?.ok===true&&Array.isArray(r.entries)){
+     if(r.entries.length)renderDictionaryResults(meaning,r.entries);
+     else if(!entry){
+      if(preferences.autoExplain!==false&&unique.size===1&&options.explain){
+       origin.textContent='AI';meaning.textContent='本地词典未命中，正在解释词义与变形…';
+       const result=await options.explain(token,source,live);if(!live())return;
+       if(result?.text){meaning.classList.add('markdown');meaning.innerHTML=renderMarkdown(result.text);if(result.warning){const warning=document.createElement('p');warning.className='error';warning.textContent=result.warning;meaning.prepend(warning)}}
+       else meaning.textContent='本次解释已取消或没有返回结果。';
+      }else meaning.textContent='本地词典未命中。';
+     }
+    }else if(!entry){origin.textContent='词典异常';meaning.textContent=r?.error||'本地词典暂不可用，请在设置中检查。'}
+   }catch(error){if(live()&&!entry){if(origin.textContent!=='AI')origin.textContent='词典异常';meaning.textContent=error?.message||'词典查询未完成，请在设置中检查。'}}
    finally{star.disabled=false}
   }
  }

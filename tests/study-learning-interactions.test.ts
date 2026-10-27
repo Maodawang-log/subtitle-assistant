@@ -19,19 +19,32 @@ beforeEach(()=>{
  workspace=createLearningWorkspace(ui,adapter);ui.setEnabled(true);ui.setPane('video');
 });
 afterEach(async()=>{workspace.reset();await flush();ui.destroy();vi.unstubAllGlobals();vi.restoreAllMocks()});
-it('loads old results into four peer groups and exports stored answers without invoking AI or collecting audio',async()=>{
+it('loads old results into three video groups and the chat pane and exports stored answers without invoking AI or collecting audio',async()=>{
  const saved={...result([{id:'s1'}]),evidence:[{id:'s1',start:1,end:3,text:'old source'}],material:{...m,cues:[]},fingerprint:'old',configuration:'old',at:1};
  const summary={...saved,result:saved.data},turn={...summary,question:'Saved question'};
  await learningAction('record',{key:m.key,record:{summary,conversation:[turn]}});
  adapter.download=vi.fn();adapter.availableChinese=()=> '已有中文';
  const loading=workspace.load();ui.$('notesSubtitles').checked=true;ui.$('exportNotes').click();await loading;
  await vi.waitFor(()=>expect(adapter.download).toHaveBeenCalledOnce());
- expect([...ui.$('pane-video').firstElementChild.children].filter((s:any)=>s.tagName==='DETAILS').map((s:any)=>s.firstElementChild.textContent)).toEqual(['总结与章节','视频问答','校对记录','视频与句子收藏']);
+ expect([...ui.$('pane-video').firstElementChild.children].filter((s:any)=>s.tagName==='DETAILS').map((s:any)=>s.firstElementChild.textContent)).toEqual(['总结与章节','校对记录','视频与句子收藏']);
  expect(ui.$('videoSummary').textContent).not.toContain('expression');expect(ui.$('videoLearning')).toBeNull();
- expect(ui.$('videoConversation').textContent).toContain('Saved question');expect(ui.$('videoConversation').textContent).not.toContain('概述与要点');
+ expect(ui.$('pane-video').contains(ui.$('videoConversation'))).toBe(false);expect(ui.$('pane-chat').contains(ui.$('videoConversation'))).toBe(true);expect(ui.$('videoConversation').textContent).toContain('Saved question');expect(ui.$('videoConversation').textContent).not.toContain('概述与要点');
  expect(ui.$('summaryStale').hidden).toBe(false);expect(ui.$('summaryScope').textContent).toContain('历史／局部总结');
  const [name,text]=adapter.download.mock.calls[0];expect(name).toMatch(/\.md$/);expect(text).toContain('先前结果');expect(text).toContain('Saved question');expect(text).toContain('old source');expect(text).toContain('已有中文');
  expect(send.mock.calls.filter(([r]:any)=>r.type==='study-learning-ai')).toHaveLength(0);expect(adapter.prepareOverall).not.toHaveBeenCalled();
+});
+it('renders chat Markdown, cited jumps and follow-ups, cancels late answers, and reloads and exports its history',async()=>{
+ const ai=()=>send.mock.calls.map(([r]:any)=>r).filter((r:any)=>r.type==='study-learning-ai');
+ adapter.jump=vi.fn(async()=>{});adapter.download=vi.fn();ui.setPane('chat');await workspace.load();expect(ai()).toHaveLength(0);
+ reply=async r=>({...result(r.evidence),data:{supported:true,blocks:[{text:'## 回答\n\n这是**重点**。\n\n- 第一点\n- 第二点',refs:[r.evidence[0].id]}],chapters:[],learning:[]}});
+ ui.$('chatQuestion').value='为什么？';ui.$('chatSend').click();await vi.waitFor(()=>expect(workspace.busy).toBe(false));
+ const chat=ui.$('videoConversation');expect(chat.querySelector('.chat-msg-user').textContent).toBe('为什么？');expect(chat.querySelector('h3').textContent).toBe('回答');expect(chat.querySelector('strong').textContent).toBe('重点');expect(chat.querySelectorAll('li')).toHaveLength(2);
+ chat.querySelector('.evidence-line button').click();await flush();expect(adapter.jump).toHaveBeenCalledWith(1,3);
+ ui.$('chatQuestion').value='再解释一下';ui.$('chatSend').click();await vi.waitFor(()=>expect(workspace.busy).toBe(false));expect(ai()[1].history).toHaveLength(1);expect(ai()[1].history[0].question).toBe('为什么？');
+ const held=deferred<any>();reply=()=>held.promise;ui.$('chatQuestion').value='取消的问题';ui.$('chatSend').click();await vi.waitFor(()=>expect(ai()).toHaveLength(3));expect(chat.querySelector('.pending-turn')).not.toBeNull();
+ ui.$('chatStop').click();expect(chat.querySelector('.pending-turn')).toBeNull();expect(ui.$('chatSend').disabled).toBe(false);held.resolve({...result([{id:'s1'}]),data:{supported:true,blocks:[{text:'迟到回答',refs:['s1']}],chapters:[],learning:[]}});await flush();expect(chat.textContent).not.toContain('迟到回答');
+ workspace.reset();await workspace.load();expect(chat.querySelectorAll('.chat-turn')).toHaveLength(2);expect(chat.textContent).toContain('再解释一下');expect(ai()).toHaveLength(3);
+ ui.setPane('video');ui.$('exportNotes').click();await vi.waitFor(()=>expect(adapter.download).toHaveBeenCalledOnce());const text=adapter.download.mock.calls[0][1];expect(text).toContain('## 视频问答');expect(text).toContain('为什么？');expect(text).toContain('再解释一下');expect(text).toContain('重点');expect(ai()).toHaveLength(3);expect(adapter.prepareOverall).not.toHaveBeenCalled();
 });
 it('cancels overall analysis if any new subtitles arrive after full preparation',async()=>{
  const hold=deferred<any>();reply=()=>hold.promise;ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(true));

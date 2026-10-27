@@ -14,6 +14,15 @@ it('adapts legacy records without mutating them, deduplicates overview and order
  expect(view.chapters.map(b=>b.title)).toEqual(['章节 1','章节 2']);
  expect(JSON.stringify(snapshot)).toBe(before);
 });
+it('joins legacy overview blocks into one paragraph and citation group for display and export without rewriting records',()=>{
+ const old={...snapshot,result:{...snapshot.result,blocks:[{text:'第一段。\n\n段内后续。',refs:['s1']},{text:'第二段。',refs:['s2','s1']}]}};
+ const before=JSON.stringify(old),view=learningView(old);
+ expect(view.overview).toHaveLength(1);expect(view.overview[0].text).toBe('第一段。 段内后续。 第二段。');expect(view.overview[0].cues.map(c=>c.id)).toEqual(['s1','s2']);
+ expect(view.chapters).toHaveLength(2);
+ const notes=exportLearningNotes(m,{summary:old},{fingerprint:'old',configuration:'old'}).text;
+ expect(notes).toContain('第一段。 段内后续。 第二段。');expect(notes).toContain('当时的原句');expect(notes).toContain('当时后面的原句');expect(notes).toContain('章节 1');
+ expect(JSON.stringify(old)).toBe(before);
+});
 it('preserves new chapter titles while rejecting invented references and ambiguous stored evidence',()=>{
  const parsed=parseGrounded(JSON.stringify({...snapshot.result,chapters:[{title:'开场',text:'分段总结',refs:['s1']}]}),snapshot.evidence);
  expect(learningView({...snapshot,result:parsed}).chapters[0]).toMatchObject({title:'开场',text:'分段总结'});

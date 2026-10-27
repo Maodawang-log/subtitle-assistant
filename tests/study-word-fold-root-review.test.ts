@@ -5,7 +5,7 @@ import { createMemoryStorageArea } from "./helpers/memory-storage-area.js";
 
 const word = (text: string) => ({ surface_form: text, basic_form: text, reading: text, pos: "名詞" });
 const $ = (id: string) => document.getElementById(id)!;
-let panel: ReturnType<typeof createWordPanel>, disk: Map<string, unknown>, lookup: ReturnType<typeof vi.fn>;
+let ai:ReturnType<typeof vi.fn>,panel: ReturnType<typeof createWordPanel>, disk: Map<string, unknown>, lookup: ReturnType<typeof vi.fn>;
 async function flush() { for (let n = 0; n < 20; n++) await Promise.resolve(); }
 const bodies = () => [...$("wordDetail").querySelectorAll<HTMLElement>(".word-body")];
 function button(selector: string) { return $("wordDetail").querySelector<HTMLButtonElement>(selector)!; }
@@ -16,14 +16,14 @@ beforeEach(async () => {
   vi.stubGlobal("JSTUDY", { hiragana: (text: string) => text, conjugation: () => "" });
   document.body.innerHTML = '<div id="wordDetail"></div><div id="wordList"></div><button id="exportWords"></button>';
   lookup = vi.fn(async () => ({ ok: true, entries: [] }));
-  panel = createWordPanel({ $ }, { binding: () => "video-a", fallback: () => "本地释义", lookup, error: vi.fn() });
+  ai=vi.fn();panel = createWordPanel({ $ }, { binding: () => "video-a", fallback: () => "本地释义", lookup, explain:ai, error: vi.fn() });
   await flush();
 });
 afterEach(() => { vi.unstubAllGlobals(); document.body.replaceChildren(); });
 
 it("starts every fresh lookup expanded and lets a title toggle just its own details", async () => {
   await panel.show([word("暮らし"), word("変化")]);
-  expect(bodies().map(x => x.hidden)).toEqual([false, false]);
+  expect(bodies().map(x => x.hidden)).toEqual([false, false]);expect(ai).not.toHaveBeenCalled();
   button(".word-toggle").click();
   expect(bodies().map(x => x.hidden)).toEqual([true, false]);
   expect(button(".word-toggle").getAttribute("aria-expanded")).toBe("false");
