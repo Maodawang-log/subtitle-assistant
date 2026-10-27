@@ -49,7 +49,7 @@ export function createListening(ui:any,adapter:any){
   catch(e){if(valid()){revealedChinese=false;error=(e as Error).message+' 点击“揭示中文”重试。'}}
   finally{if(valid()){pending=false;render()}}
  };
- $('listenRecord').onclick=()=>adapter.record();
+
  render();
  return {sync,clearChinese,hideOriginal:()=>active&&!revealedOriginal,hideChinese:()=>active,
   reset(){active=false;key='';clearChinese();revealedOriginal=false;adapter.clearListeningPlayback?.();render()},
