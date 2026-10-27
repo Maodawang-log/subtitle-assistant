@@ -28,6 +28,7 @@ export type StudyCancelResponse = StudyWireResult<{ cancelled: true }>;
 export interface StudyAudioWindowData {
   timestamp_origin: "absolute";
   segments: Array<{ start: number; end: number; text: string }>;
+  opening_repair?: { version:1 };
 }
 export type StudyAsrWindowResponse = StudyWireResult<StudyAudioWindowData>;
 export type StudyAsrHealthResponse = StudyWireResult<Record<string, unknown>>;
@@ -81,7 +82,8 @@ function readWindow(raw: unknown): StudyAsrWindowResponse {
         || typeof segment.end !== "number" || !Number.isFinite(segment.end) || typeof segment.text !== "string") return invalidResponse();
       segments.push({ start: segment.start, end: segment.end, text: segment.text });
     }
-    return { timestamp_origin: "absolute", segments };
+    const opening_repair=isStudyRecord(data.opening_repair)&&data.opening_repair.version===1?{version:1 as const}:undefined;
+    return { timestamp_origin: "absolute", segments, ...(opening_repair?{opening_repair}:{}) };
   });
 }
 const responseReaders: { [K in keyof StudyResponses]: (raw: unknown) => StudyResponses[K] } = {

@@ -15,27 +15,46 @@ beforeEach(()=>{
  reply=async r=>r.kind==='batch'?{ok:true,data:r.evidence.map((c:any)=>({id:c.id,status:'suggested',text:'changed '+c.text}))}:result(r.evidence);
  send=vi.fn(async r=>r.type==='study-learning-ai'?reply(r):{ok:true});
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('chrome',{runtime:{sendMessage:send,getURL:(p:string)=>p},storage:{local:createMemoryStorageArea(disk)}});
- ui=createStudyShell();adapter={material:()=>structuredClone(m),meta:()=>({...m}),current:()=>m.cues[0],binding:()=>binding,configuration:()=>"fixture",manualEditing:()=>false,correctionSnapshot:async()=>[],commitBatch:vi.fn(async()=>{}),undoBatch:vi.fn(async()=>{}),cancelCollection:vi.fn(),collectFull:vi.fn(async()=>{}),redraw:()=>{},selectRelative:()=>{},replay:async()=>{},translateCurrent:async()=>{},record:()=>{},jump:async()=>{}};
+ ui=createStudyShell();adapter={material:()=>structuredClone(m),meta:()=>({...m}),current:()=>m.cues[0],binding:()=>binding,configuration:()=>"fixture",manualEditing:()=>false,correctionSnapshot:async()=>[],commitBatch:vi.fn(async()=>{}),undoBatch:vi.fn(async()=>{}),cancelCollection:vi.fn(),prepareOverall:vi.fn(async()=>{m.durationVerified=true;m.ranges=[{start:0,end:m.duration}];return structuredClone(m)}),redraw:()=>{},selectRelative:()=>{},replay:async()=>{},translateCurrent:async()=>{},record:()=>{},jump:async()=>{}};
  workspace=createLearningWorkspace(ui,adapter);ui.setEnabled(true);ui.setPane('video');
 });
 afterEach(async()=>{workspace.reset();await flush();ui.destroy();vi.unstubAllGlobals();vi.restoreAllMocks()});
-it('loads old results into five peer groups and exports stored answers without invoking AI or collecting audio',async()=>{
+it('loads old results into four peer groups and exports stored answers without invoking AI or collecting audio',async()=>{
  const saved={...result([{id:'s1'}]),evidence:[{id:'s1',start:1,end:3,text:'old source'}],material:{...m,cues:[]},fingerprint:'old',configuration:'old',at:1};
  const summary={...saved,result:saved.data},turn={...summary,question:'Saved question'};
  await learningAction('record',{key:m.key,record:{summary,conversation:[turn]}});
  adapter.download=vi.fn();adapter.availableChinese=()=> '已有中文';
  const loading=workspace.load();ui.$('notesSubtitles').checked=true;ui.$('exportNotes').click();await loading;
  await vi.waitFor(()=>expect(adapter.download).toHaveBeenCalledOnce());
- expect([...ui.$('pane-video').firstElementChild.children].filter((s:any)=>s.tagName==='DETAILS').map((s:any)=>s.firstElementChild.textContent)).toEqual(['总结与章节','视频学习清单','视频问答','校对记录','视频与句子收藏']);
- expect(ui.$('videoSummary').textContent).not.toContain('expression');expect(ui.$('videoLearning').textContent).toContain('expression');
+ expect([...ui.$('pane-video').firstElementChild.children].filter((s:any)=>s.tagName==='DETAILS').map((s:any)=>s.firstElementChild.textContent)).toEqual(['总结与章节','视频问答','校对记录','视频与句子收藏']);
+ expect(ui.$('videoSummary').textContent).not.toContain('expression');expect(ui.$('videoLearning')).toBeNull();
  expect(ui.$('videoConversation').textContent).toContain('Saved question');expect(ui.$('videoConversation').textContent).not.toContain('概述与要点');
- expect(ui.$('summaryStale').hidden).toBe(false);expect(ui.$('learningStale').hidden).toBe(false);
+ expect(ui.$('summaryStale').hidden).toBe(false);expect(ui.$('summaryScope').textContent).toContain('历史／局部总结');
  const [name,text]=adapter.download.mock.calls[0];expect(name).toMatch(/\.md$/);expect(text).toContain('先前结果');expect(text).toContain('Saved question');expect(text).toContain('old source');expect(text).toContain('已有中文');
- expect(send.mock.calls.filter(([r]:any)=>r.type==='study-learning-ai')).toHaveLength(0);expect(adapter.collectFull).not.toHaveBeenCalled();
+ expect(send.mock.calls.filter(([r]:any)=>r.type==='study-learning-ai')).toHaveLength(0);expect(adapter.prepareOverall).not.toHaveBeenCalled();
 });
-it('continues summary of the clicked snapshot when later non-overlapping subtitles arrive',async()=>{
+it('cancels overall analysis if any new subtitles arrive after full preparation',async()=>{
  const hold=deferred<any>();reply=()=>hold.promise;ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(true));
- m.cues.push({...m.cues[0],id:'next',start:31,end:33});workspace.changed();expect(workspace.busy).toBe(true);hold.resolve(result([{id:'s1'}]));await vi.waitFor(()=>expect(ui.$('videoSummary').textContent).toContain('summary'));await vi.waitFor(()=>expect(workspace.busy).toBe(false));expect(ui.$('summaryStale').hidden).toBe(false);
+ m.cues.push({...m.cues[0],id:'next',start:31,end:33});workspace.changed();expect(workspace.busy).toBe(false);hold.resolve(result([{id:'s1'}]));await flush();expect(ui.$('videoSummary').textContent).not.toContain('global chapter');
+});
+it('archives legacy learning data when replacing a historical partial summary, without generating new learning',async()=>{
+ const previous={result:{...result([{id:'s1'}]).data},material:{...m,cues:[]},evidence:[{id:'s1',start:1,end:3,text:'old original'}],at:1};
+ await learningAction('record',{key:m.key,record:{summary:previous,conversation:[]}});
+ ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(workspace.busy).toBe(false));
+ const saved=(await learningAction('get',{key:m.key})).record;
+ expect(saved.legacySummaries[0]).toEqual(previous);expect(saved.summary.result.learning).toBeUndefined();expect(saved.summary.overall.kind).toBe('overall');
+ expect(send.mock.calls.filter(([r]:any)=>r.type==='study-learning-ai').every(([r]:any)=>!r.notes?.some((n:any)=>n.kind==='learning'))).toBe(true);
+});
+it.each(['stop','route','language','model','subtitles'])('does not submit AI after pending full preparation is invalidated by %s',async reason=>{
+ const pending=deferred<any>();adapter.prepareOverall=vi.fn(()=>pending.promise);
+ ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(adapter.prepareOverall).toHaveBeenCalledOnce());
+ const signal=adapter.prepareOverall.mock.calls[0][0].signal;
+ if(reason==='stop')ui.$('learningStop').click();
+ else if(reason==='model')workspace.configurationChanged();
+ else if(reason==='subtitles'){m.cues[0].text='changed';workspace.changed()}
+ else {binding='new';workspace.reset()}
+ expect(signal.aborted).toBe(true);pending.resolve({...m,durationVerified:true,ranges:[{start:0,end:m.duration}]});await flush();
+ expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(false);
 });
 it.each(['edit','language','close'])('does not apply a late batch after %s',async reason=>{
  const hold=deferred<any>();reply=()=>hold.promise;ui.$('batchAll').click();await vi.waitFor(()=>expect(send.mock.calls.some(([r]:any)=>r.kind==='batch')).toBe(true));
@@ -59,7 +78,7 @@ it('has one video bookmark control, saves acquired material and toggles back to 
  expect(ui.$('pinMaterial')).toBeNull();expect(ui.$('bookmarkCue')).toBeNull();
  ui.$('bookmarkVideo').click();await vi.waitFor(()=>expect(ui.$('bookmarkVideo').textContent).toBe('已收藏'));
  expect(disk.get('biliscriptStudyLibraryV1').documents[m.key].cues).toEqual(m.cues);
- expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(false);expect(adapter.collectFull).not.toHaveBeenCalled();
+ expect(send.mock.calls.some(([r]:any)=>r.type==='study-learning-ai')).toBe(false);expect(adapter.prepareOverall).not.toHaveBeenCalled();
  ui.$('bookmarkVideo').click();await vi.waitFor(()=>expect(ui.$('bookmarkVideo').textContent).toBe('收藏视频'));
  expect(disk.get('biliscriptStudyLibraryV1').documents[m.key]).toBeUndefined();expect(disk.get('biliscriptStudyTemporaryV2')['document:'+m.key].value.cues).toEqual(m.cues);
 });

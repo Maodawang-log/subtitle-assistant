@@ -20,7 +20,7 @@ beforeEach(()=>{
  m={version:1,key:materialKey('BV1ab411c7mD:p1','en'),route:'BV1ab411c7mD:p1',identity:'BV1ab411c7mD:111',bvid:'BV1ab411c7mD',page:1,cid:'111',language:'en',title:'Source video',duration:90,offset:2,source:'cc',ranges:[],cues:[{id:'one',revision:1,start:53,end:55,text:'A sentence.',originalText:'A sentence.'}],at:1};
  send=vi.fn(async r=>({ok:true,data:{supported:true,blocks:[{text:'summary',refs:[r.evidence?.[0]?.id]}],chapters:[],learning:[{text:'expression',refs:[r.evidence?.[0]?.id]}]},model:'fixture',provider:'fixture'}));
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('chrome',{runtime:{sendMessage:send,getURL:(p:string)=>p},storage:{local:area}});
- adapter={material:()=>structuredClone(m),meta:()=>({...m}),current:()=>m.cues[0],binding:()=>m.key,configuration:()=>'',manualEditing:()=>false,cancelCollection:vi.fn(),collectFull:vi.fn(),redraw:()=>{},jump:vi.fn(async()=>{})};mount();
+ adapter={material:()=>structuredClone(m),meta:()=>({...m}),current:()=>m.cues[0],binding:()=>m.key,configuration:()=>'',manualEditing:()=>false,cancelCollection:vi.fn(),prepareOverall:vi.fn(async()=>({...structuredClone(m),wholeSource:{kind:'cc-track',identity:m.identity,bvid:m.bvid,page:m.page,language:m.language,trackId:'fixture'}})),redraw:()=>{},jump:vi.fn(async()=>{})};mount();
 });
 afterEach(async()=>{workspace.reset();await settle();ui.destroy();vi.unstubAllGlobals();vi.restoreAllMocks()});
 
@@ -32,7 +32,7 @@ it('waits for persistence, blocks repeated clicks across entrances, then toggles
  hold.resolve();await vi.waitFor(()=>expect(first.textContent).toBe('★'));
  expect(second.textContent).toBe('★');expect(first.classList.contains('is-saved')).toBe(true);expect(first.getAttribute('aria-pressed')).toBe('true');expect(first.title).toBe('取消收藏此句');expect(ui.$('status').textContent).toBe('已收藏句子。');expect(saved()).toHaveLength(1);
  second.click();await vi.waitFor(()=>expect(first.textContent).toBe('☆'));expect(saved()).toHaveLength(0);expect(first.getAttribute('aria-pressed')).toBe('false');expect(ui.$('status').textContent).toContain('已取消');
- expect(adapter.collectFull).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(disk.get(LIBRARY_KEY).documents).toEqual({});
+ expect(adapter.prepareOverall).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(disk.get(LIBRARY_KEY).documents).toEqual({});
 });
 it.each(['save','remove'])('keeps persisted state and gives visible feedback on %s failure',async operation=>{
  const b=star();await workspace.refreshFavorites();if(operation==='remove'){b.click();await vi.waitFor(()=>expect(b.textContent).toBe('★'))}
@@ -46,13 +46,13 @@ it('reconstructs stars after row rebuild, reopening and clearing temporary cache
  await learningAction('cacheClear');workspace.reset();ui.destroy();mount();const reopened=star();await vi.waitFor(()=>expect(reopened.textContent).toBe('★'));
  expect(disk.get(LIBRARY_KEY).records.legacy.conversation).toEqual(['kept']);expect(disk.get(LIBRARY_KEY).reviews.word.due).toBe(42);expect(disk.get('correction-fixture')).toEqual(correction);expect(disk.get('biliscriptStudyVocabulary')).toEqual(vocabulary);
 });
-it('uses the same old sentence id in stars, summary citations and learning examples, and synchronizes list removal',async()=>{
+it('uses the same old sentence id in stars, summary citations, and synchronizes list removal',async()=>{
  const old=sentenceBookmark(m.cues[0],m);expect(old.id).toBe(JSON.stringify(['sentence',m.key,m.identity,53,55,'A sentence.']));
  const b=star();b.click();await vi.waitFor(()=>expect(b.textContent).toBe('★'));
- ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence,#videoLearning .save-sentence')).toHaveLength(3));
- const controls=Array.from(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence,#videoLearning .save-sentence')) as HTMLButtonElement[];
+ ui.$('summaryGenerate').click();await vi.waitFor(()=>expect(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence')).toHaveLength(1));
+ const controls=Array.from(ui.$('pane-video').querySelectorAll('#videoSummary .save-sentence')) as HTMLButtonElement[];
  expect(controls.every(c=>c.textContent==='已收藏')).toBe(true);expect(saved()).toHaveLength(1);
- controls[2].click();await vi.waitFor(()=>expect(b.textContent).toBe('☆'));expect(controls.every(c=>c.getAttribute('aria-pressed')==='false')).toBe(true);
+ controls[0].click();await vi.waitFor(()=>expect(b.textContent).toBe('☆'));expect(controls.every(c=>c.getAttribute('aria-pressed')==='false')).toBe(true);
  controls[0].click();await vi.waitFor(()=>expect(b.textContent).toBe('★'));expect(saved()).toHaveLength(1);
  ui.$('savedLearning').querySelector('.favorite-sentence .remove-favorite').click();await vi.waitFor(()=>expect(b.textContent).toBe('☆'));expect(controls.every(c=>c.getAttribute('aria-pressed')==='false')).toBe(true);
 });

@@ -1,8 +1,10 @@
 import type { Evidence, GroundedBlock, GroundedResult } from './learning-ai.js';
 import type { VideoMaterial } from './learning-data.js';
+import type { OverallSummaryScope } from './overall-summary.js';
 
 export interface LearningSnapshot {
  result: GroundedResult;
+ overall?:OverallSummaryScope;
  evidence: Evidence[];
  material: VideoMaterial & { cueCount?: number };
  fingerprint?: string;
@@ -39,8 +41,7 @@ export function learningView(snapshot: LearningSnapshot) {
  return {
   supported, blocks,
   overview: blocks.filter(b => !chapters.some(c => c.text.trim() === b.text.trim() && citationIdentity(c) === citationIdentity(b))),
-  chapters: chapters.map((c,i) => ({...c, title:c.title || `章节 ${i+1}`})),
-  learning: supported ? read(snapshot.result.learning) : []
+  chapters: chapters.map((c,i) => ({...c, title:c.title || `章节 ${i+1}`}))
  };
 }
 

@@ -94,6 +94,7 @@ export interface BoundedAsrController {
   collectAll(): Promise<void>;
   cancelCollection(): void;
   readonly collecting: boolean;
+  readonly running: boolean;
 }
 
 interface WindowSlot {
@@ -506,5 +507,5 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
     return new Promise((resolve,reject)=>{collection={owner,resolve,reject};plan(owner)});
   }
   function cancelCollection(){const old=collection;collection=undefined;old?.reject(abortError());if(active){const job=active;active=undefined;job.abort.abort()}if(session)plan(session)}
-  return { start, stop, seek, updateTime, collectAll, cancelCollection, get collecting(){return !!collection} };
+  return { start, stop, seek, updateTime, collectAll, cancelCollection, get collecting(){return !!collection}, get running(){return !!session} };
 }

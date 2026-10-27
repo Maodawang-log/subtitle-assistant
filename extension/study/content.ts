@@ -7,7 +7,8 @@ import { getNativeStudySource, sameNativeBinding } from "./native-source.js";
 import { exportSubtitles } from './learning-export.js';
 import { createLearningWorkspace } from "./learning-workspace.js";
 import { learningAction } from "./learning-store.js";
-import { materialKey, materialCoverage, mergeRanges } from "./learning-data.js";
+import { overallBasis, materialKey, materialCoverage, mergeRanges } from "./learning-data.js";
+import { overallSourcePlan, overallScope } from './overall-summary.js';
 import { createStudyShell } from "./ui-shell.js";
 import { createInlineRecorder } from "./inline-recorder.js";
 import { createWordPanel } from "./word-panel.js";
@@ -27,7 +28,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  const translations=new Map(),attempted=new Set();
  let corrections={},manualDraft=null;const writeCorrection=(storageKey,resource,cue)=>learningAction("correctionWrite",{storageKey,resource,cue});
  let listeningPlayback=null;
- let workspace=null,materialSource="asr",fullCollecting=false,batchApplying=false,restoredMaterial=null;
+ let workspace=null,materialSource="asr",fullCollecting=false,batchApplying=false,restoredMaterial=null,wholeSource=null,recognizedModel="",fullPreparation=null;
  const timeline=createCueTimeline(),invalidChinese=new Set();let appearance=normalizeAppearance(null),configurationEpoch=0;
  let recognizedWindows=[],asrError=false,aiEpoch=0,automaticFailed=false,nativeMode=false,nativeSession=null,nativeSeekEpoch=0;
  let scopeWaiting=false,nativeRefreshPending=false,lastNativeCheck=0,lookupEpoch=0,followRows=true;
@@ -57,15 +58,15 @@ import { renderMarkdown } from "../ui/markdown.js";
   if(signal.aborted||!nativeLive(expected)||nativeSession!==expected)throw new DOMException("播放资源已更新","AbortError");
   if(fresh.status!=="ready"||!sameNativeBinding(fresh.binding,expected.binding)||fresh.bvid!==payload.bvid||fresh.cid!==payload.cid||fresh.source.url!==payload.audio_url||payload.start+payload.duration>fresh.playableDuration)throw new Error("当前音轨关联或可播放范围已改变，请重新开启字幕。");
  }
- function startNative(n,preserve=false){
-  updateTrackChoices();materialSource="asr";
+ function startNative(n,preserve=false,forOverall=false){
+  updateTrackChoices();materialSource="asr";wholeSource=null;recognizedModel=settings.asrModel||"small";
   asr.stop();nativeMode=true;nativeSession=n;nativeSeekEpoch++;clip={bvid:n.bvid,cid:n.cid,title:n.title,duration:n.duration};identity=n.bvid+":"+n.cid;
   if(!preserve){timeline.clear();cues=[];chinese=[];selected=0;active=-1;recognizedWindows=[];}
   asrError=false;asrMode=true;scopeWaiting=false;
   $("source").textContent="当前播放器实际音轨 · "+n.title+(n.audit.previewSeconds!==null?" · 当前试看范围 "+n.playableDuration+" 秒":"");
-  if((video?.currentTime||0)>=n.playableDuration){waitForCurrent();return}
+  if(!forOverall&&(video?.currentTime||0)>=n.playableDuration){waitForCurrent();return}
   waitForCurrent();
-  asr.start({enabled:true,bvid:n.bvid,cid:n.cid,currentTime:video?.currentTime||0,duration:n.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity,validatedAudioSource:n.source,playableDuration:n.playableDuration,completedWindows:preserve?recognizedWindows:[]});
+  asr.start({enabled:true,bvid:n.bvid,cid:n.cid,currentTime:forOverall?0:video?.currentTime||0,duration:n.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity,validatedAudioSource:n.source,playableDuration:n.playableDuration,completedWindows:preserve?recognizedWindows:[]});
  }
  async function nativeSeek(){
   const seekId=++nativeSeekEpoch,mine=generation;asr.stop();nativeSession=null;asrError=false;scopeWaiting=true;waiting=false;resumeAfter=false;
@@ -75,7 +76,7 @@ import { renderMarkdown } from "../ui/markdown.js";
   startNative(fresh,true);
  }
  async function refreshNativeScope(){
-  if(nativeRefreshPending||Date.now()-lastNativeCheck<1500||!enabled||!nativeMode)return;
+  if(nativeRefreshPending||Date.now()-lastNativeCheck<1500||!enabled||!nativeMode||fullCollecting)return;
   nativeRefreshPending=true;lastNativeCheck=Date.now();const mine=generation,seekId=nativeSeekEpoch,old=nativeSession;
   try{
    const fresh=await getNativeStudySource();
@@ -97,7 +98,7 @@ import { renderMarkdown } from "../ui/markdown.js";
   onCues(items,meta){
    if(currentRoute()!==route){reset(currentRoute());return;}
    if(!enabled||meta.language!==sourceLanguage||meta.resourceId!==identity||nativeMode&&!nativeLive(nativeSession))return;
-   recognizedWindows=recognizedWindows.filter(w=>w.start!==meta.windowStart);recognizedWindows.push({start:meta.windowStart,end:meta.windowStart+meta.duration});
+   recognizedModel=meta.model;recognizedWindows=recognizedWindows.filter(w=>w.start!==meta.windowStart);recognizedWindows.push({start:meta.windowStart,end:meta.windowStart+meta.duration});
    const previousCue=cues[selected]?{...cues[selected]}:null;timeline.setCorrections(corrections[identity]||[]);cues=timeline.replaceWindow(JSTUDY.normalize(items),meta);
    if(previousCue){const surviving=cues.find(c=>c.id===previousCue.id);if(!surviving||surviving.revision!==previousCue.revision||surviving.start!==previousCue.start||surviving.end!==previousCue.end)loopOff()}
    if(previousCue&&cues.length){const same=cues.findIndex(c=>c.id===previousCue.id);if(same>=0)selected=same;else{const time=video?video.currentTime-offset:previousCue.start,at=JSTUDY.at(cues,time);selected=at>=0?at:cues.reduce((best,c,index)=>Math.abs(c.start-previousCue.start)<Math.abs(cues[best].start-previousCue.start)?index:best,0);loopOff()}}
@@ -109,7 +110,7 @@ import { renderMarkdown } from "../ui/markdown.js";
    }
    if(timeline.unmatchedCorrections)status("有 "+timeline.unmatchedCorrections+" 条校对与新时间轴无法可靠对应，原修改已保留。",true);
   },
-  onStatus(event){if(currentRoute()!==route){reset(currentRoute());return;}if(!enabled)return;if(event.phase==="error"){if(nativeMode)asr.stop();asrError=true;waiting=false;resumeAfter=false;status(event.message,true)}else if(event.phase!=="disabled")status(event.message)}
+  onStatus(event){if(fullPreparation&&!fullPreparation.signal.aborted){if(event.phase==='error')fullPreparation.failure=event.message;fullPreparation.onProgress(event.message);}if(currentRoute()!==route){reset(currentRoute());return;}if(!enabled)return;if(event.phase==="error"){if(nativeMode)asr.stop();asrError=true;waiting=false;resumeAfter=false;status(event.message,true)}else if(event.phase!=="disabled")status(event.message)}
  });
  function invalidateCueWork(notifyProof=true){
   aiEpoch++;detailEpoch++;translationEpoch++;selection.reset();automaticBusy=false;aiBusy=false;automaticFailed=false;attempted.clear();
@@ -151,7 +152,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  }
  function clearOverlay(){overlay?.remove();overlay=null;overlayRoot=null;overlaySignature=""}
  function stop(reason="字幕已关闭，识别和后续文字请求已停止。"){
-  workspace?.reset();fullCollecting=false;restoredMaterial=null;manualDraft=null;$("track").hidden=true;
+  workspace?.reset();fullCollecting=false;fullPreparation=null;restoredMaterial=null;wholeSource=null;recognizedModel="";manualDraft=null;$("track").hidden=true;
   proofreader.invalidate();
   bilingual=false;translationEpoch++;detailEpoch++;selection.reset();wordPanel.reset();$("translate").textContent="双语字幕：关";$("translate").setAttribute("aria-pressed","false");$("translate").classList.remove("on");
   recorder.clear();ui.setEnabled(false);scopeWaiting=false;lookupEpoch++;
@@ -203,12 +204,12 @@ import { renderMarkdown } from "../ui/markdown.js";
    if(!preferredTrackId&&savedMaterial.document&&savedMaterial.document.identity===identity){restoreMaterial(savedMaterial.document);if(materialSource==="asr"&&!materialCoverage(savedMaterial.document).complete){asrMode=true;asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:video?.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity,completedWindows:recognizedWindows});}void workspace.load().catch(e=>status(e.message,true));status("已恢复"+(savedMaterial.pinned?"长期保存":"临时缓存")+"字幕 · "+materialCoverage(savedMaterial.document).text);return;}
    updateTrackChoices(result.status==="ready"?result.tracks:[],result.selectedTrackId||"");
    if(result.status==="ready"){
-    materialSource="cc";cues=loadCorrected(JSTUDY.normalize(result.cues),identity+"|"+sourceLanguage);chinese=JSTUDY.normalize(result.chineseCues||[]);
+    materialSource="cc";wholeSource=result.wholeTrack?{kind:"cc-track",identity,bvid:result.bvid,page:videoMeta().page,language:sourceLanguage,trackId:result.selectedTrackId}:null;cues=loadCorrected(JSTUDY.normalize(result.cues),identity+"|"+sourceLanguage);chinese=JSTUDY.normalize(result.chineseCues||[]);
     $("source").textContent="B站"+languageName()+"文本轨 · "+result.title;updateAtTime(true);status(languageName()+"字幕已就绪；可单独开启双语字幕。");
    }else{
     if(native.status==="ready"&&native.bvid===result.bvid&&native.cid===result.cid&&nativeLive(native)){startNative(native);return;}
     if(native.status==="unavailable"&&["PREVIEW_END","PREVIEW_UNKNOWN"].includes(native.reason))throw new Error(native.message);
-    materialSource="asr";asrMode=true;$("source").textContent="本地 Whisper · "+result.title;waitForCurrent();
+    materialSource="asr";wholeSource=null;recognizedModel=settings.asrModel||"small";asrMode=true;$("source").textContent="本地 Whisper · "+result.title;waitForCurrent();
     asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:Number.isFinite(video?.duration)?Math.min(video.duration,result.duration||Infinity):result.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity});
    }
   }catch(e){if(enabled&&mine===generation&&e.name!=="AbortError")status(nativeFallback?.reason==="NO_PLAYED_AUDIO"?"尚未关联当前音轨。请先正常播放几秒，再点“重新取字幕”。":nativeFallback?.reason==="NO_MARKER"?"请刷新视频页后重新开启字幕。":e.message,true)}
@@ -393,7 +394,7 @@ import { renderMarkdown } from "../ui/markdown.js";
  $("subtitleFile").onchange=()=>safe(async()=>{
   const f=$("subtitleFile").files[0];if(!f)return;if(f.size>5*1024*1024)throw new Error("字幕不能超过5MB");const mine=generation;
   const parsed=JSTUDY.parseSubtitle(await f.text());if(!enabled||mine!==generation)return;
-  workspace?.manualStarted();materialSource="import";asr.stop();abort?.abort();asrMode=false;nativeMode=false;nativeSession=null;nativeSeekEpoch++;aiEpoch++;detailEpoch++;translationEpoch++;selection.reset();wordPanel.reset(true);automaticBusy=false;automaticFailed=false;send({type:"study-stop-ai"}).catch(()=>{});loopOff();identity=identity||route;cues=loadCorrected(parsed,identity+"|"+sourceLanguage);invalidChinese.clear();chinese=[];translations.clear();attempted.clear();
+  workspace?.manualStarted();materialSource="import";wholeSource=null;recognizedModel="";asr.stop();abort?.abort();asrMode=false;nativeMode=false;nativeSession=null;nativeSeekEpoch++;aiEpoch++;detailEpoch++;translationEpoch++;selection.reset();wordPanel.reset(true);automaticBusy=false;automaticFailed=false;send({type:"study-stop-ai"}).catch(()=>{});loopOff();identity=identity||route;cues=loadCorrected(parsed,identity+"|"+sourceLanguage);invalidChinese.clear();chinese=[];translations.clear();attempted.clear();
   // New imports are temporary until the user explicitly pins the material.
   workspace?.changed();
   if(!enabled||mine!==generation)return;
@@ -421,18 +422,56 @@ import { renderMarkdown } from "../ui/markdown.js";
  chrome.storage.onChanged?.addListener(onStorageChange);
  function applySettings(r){settings={...settings,...r?.config};const next=normalizeSourceLanguage(settings.sourceLanguage);if(!languageOverride&&next!==sourceLanguage){sourceLanguage=next;reset(route,true)}}
  function videoMeta(){const r=JSTUDY.resource(location.href);return {bvid:clip?.bvid||r?.bvid||"",page:r?.page||1,cid:String(clip?.cid||""),language:sourceLanguage,title:clip?.title||document.title,route,identity:identity||route}}
- function getMaterial(){if(!route)return null;const meta=videoMeta(),duration=Number(nativeSession?.duration||clip?.duration||restoredMaterial?.duration||video?.duration)||0;return {version:1,key:materialKey(route,sourceLanguage),...meta,offset,duration:Number.isFinite(duration)?duration:0,durationVerified:!!(nativeSession?.duration||clip?.duration||restoredMaterial?.durationVerified),source:materialSource,ranges:materialSource==="asr"?mergeRanges(recognizedWindows):mergeRanges(cues.map(c=>({start:c.start,end:c.end}))),cues:cues.map(c=>({...c})),at:Date.now()}}
- function restoreMaterial(m){restoredMaterial=m;materialSource=m.source;identity=m.identity;clip={bvid:m.bvid,cid:m.cid,title:m.title};offset=m.offset||0;$("offset").value=offset;recognizedWindows=m.source==="asr"?m.ranges:[];const raw=m.cues.map(c=>({...c,text:c.originalText||c.text}));if(m.source==="asr"){timeline.clear();timeline.setCorrections(corrections[identity]||[]);for(const r of m.ranges)for(let start=r.start;start<r.end;start+=30){const duration=Math.min(30,r.end-start);cues=timeline.replaceWindow(raw.filter(c=>c.end>start&&c.start<start+duration),{windowStart:start,duration,resourceId:identity,language:sourceLanguage,model:settings.asrModel||"small"})}}else cues=loadCorrected(raw,identity+"|"+sourceLanguage);$("source").textContent="恢复资料 · "+m.title;updateAtTime(true);workspace.refresh()}
+ function getMaterial(){if(!route)return null;const meta=videoMeta(),duration=Number(nativeSession?.duration||clip?.duration||restoredMaterial?.duration||video?.duration)||0;return {version:1,key:materialKey(route,sourceLanguage),...meta,offset,duration:Number.isFinite(duration)?duration:0,durationVerified:!!(nativeSession?.duration||clip?.duration||restoredMaterial?.durationVerified),source:materialSource,...(wholeSource?{wholeSource:{...wholeSource}}:{}),...(materialSource==="asr"&&recognizedModel?{asrModel:recognizedModel}:{}),ranges:materialSource==="asr"?mergeRanges(recognizedWindows):mergeRanges(cues.map(c=>({start:c.start,end:c.end}))),cues:cues.map(c=>({...c})),at:Date.now()}}
+ function restoreMaterial(m){restoredMaterial=m;materialSource=m.source;wholeSource=m.wholeSource?{...m.wholeSource}:null;recognizedModel=m.asrModel||"";identity=m.identity;clip={bvid:m.bvid,cid:m.cid,title:m.title};offset=m.offset||0;$("offset").value=offset;recognizedWindows=m.source==="asr"?m.ranges:[];const raw=m.cues.map(c=>({...c,text:c.originalText||c.text}));if(m.source==="asr"){timeline.clear();timeline.setCorrections(corrections[identity]||[]);for(const r of m.ranges)for(let start=r.start;start<r.end;start+=30){const duration=Math.min(30,r.end-start);cues=timeline.replaceWindow(raw.filter(c=>c.end>start&&c.start<start+duration),{windowStart:start,duration,resourceId:identity,language:sourceLanguage,model:settings.asrModel||"small"})}}else cues=loadCorrected(raw,identity+"|"+sourceLanguage);$("source").textContent="恢复资料 · "+m.title;updateAtTime(true);workspace.refresh()}
  async function applyStoredCorrections(items){corrections={...corrections,[identity]:items};timeline.setCorrections(items);cues=timeline.reapplyCorrections();for(const c of cues)if(c.edited)invalidChinese.add(c.id);invalidateCueWork();display(selected,true);updateAtTime(true);workspace.changed({batchOwn:true})}
  workspace=createLearningWorkspace(ui,{
-  material:getMaterial,meta:videoMeta,download,current:()=>cues[selected],binding,configuration:()=>JSON.stringify([settings.baseUrl,settings.model,settings.compatibility]),manualEditing:()=>!!manualDraft,
+  material:getMaterial,meta:videoMeta,download,current:()=>cues[selected],binding,configuration:()=>JSON.stringify([settings.baseUrl,settings.model,settings.compatibility,settings.asrModel]),manualEditing:()=>!!manualDraft,
   correctionSnapshot:async()=>{const data=await chrome.storage.local.get(correctionStorageKey(route,sourceLanguage));return data[correctionStorageKey(route,sourceLanguage)]?.[identity]||[]},
   async commitBatch(batch){const owner=binding(),storageKey=correctionStorageKey(route,sourceLanguage),resource=identity,key=materialKey(route,sourceLanguage);batchApplying=true;try{const r=await learningAction("batchCommit",{...batch,storageKey,resource,key});if(owner===binding())await applyStoredCorrections(r.corrections)}finally{batchApplying=false}},
   async undoBatch(batch){const owner=binding(),storageKey=correctionStorageKey(route,sourceLanguage),resource=identity,key=materialKey(route,sourceLanguage);const data=await chrome.storage.local.get(storageKey);batchApplying=true;try{const r=await learningAction("batchUndo",{id:batch.id,key,storageKey,resource,expected:data[storageKey]?.[resource]||[]});if(owner===binding())await applyStoredCorrections(r.corrections)}finally{batchApplying=false}},
-  async collectFull(){guard();loopOff();video.pause();fullCollecting=true;try{if(!asrMode){const n=await getNativeStudySource();if(n.status!=="ready"||!nativeLive(n))throw new Error("无法确认当前完整音轨，可导入完整字幕后总结");startNative(n)}await asr.collectAll()}finally{fullCollecting=false;workspace.changed({collection:true})}},
-  cancelCollection(){if(fullCollecting){asr.cancelCollection();fullCollecting=false}},
+  async prepareOverall({signal,onProgress,confirmImport}){
+   if(!enabled||!video||loading)throw new Error('请先开启字幕并等待当前资料准备完成。');
+   const owner={binding:binding(),configuration:configurationEpoch,signal,onProgress};fullPreparation=owner;fullCollecting=true;
+   const checked=()=>{if(signal.aborted||fullPreparation!==owner||owner.binding!==binding()||owner.configuration!==configurationEpoch||currentRoute()!==route)throw new DOMException('资料已变更，已停止整体总结','AbortError')};
+   const cancelled=()=>{if(fullPreparation===owner){fullPreparation=null;fullCollecting=false;if(asr.collecting)asr.cancelCollection()}};
+   signal.addEventListener('abort',cancelled,{once:true});
+   try{
+    checked();let m=getMaterial(),plan=overallSourcePlan(m,settings.asrModel||'small');
+    if(plan.action==='ready'){onProgress('已复用全片资料，准备整体总结。');return structuredClone(m)}
+    if(plan.action==='refresh-cc'){
+     onProgress('正在重新取得整条字幕轨…');
+     const r=await getJapaneseCc({language:sourceLanguage,signal,includeChinese:true,preferredTrackId:$('track').value||undefined,onStatus:text=>{checked();onProgress(text)}});checked();
+     if(r.bvid!==m.bvid||String(r.cid)!==m.cid)throw new Error('字幕轨与当前分P不匹配，未生成整体总结。');
+     if(r.status==='ready'){
+      if(!r.wholeTrack||!r.selectedTrackId)throw new Error('未确认取得整条字幕轨，未生成整体总结。');
+      clip=r;materialSource='cc';wholeSource={kind:'cc-track',identity,bvid:r.bvid,page:m.page,language:sourceLanguage,trackId:r.selectedTrackId};
+      cues=loadCorrected(JSTUDY.normalize(r.cues),identity+'|'+sourceLanguage);chinese=JSTUDY.normalize(r.chineseCues||[]);invalidChinese.clear();translations.clear();attempted.clear();
+      invalidateCueWork();updateAtTime(true);workspace.changed({collection:true});m=getMaterial();overallScope(m);return structuredClone(m);
+     }
+    }else if(plan.action==='confirm-import'){
+     onProgress('请确认导入字幕是否完整。');const decision=await confirmImport(structuredClone(m),signal);checked();
+     if(decision==='cancel')throw new DOMException('已取消，保留原有结果','AbortError');
+     if(decision==='complete'){
+      wholeSource={kind:'confirmed-import',identity,bvid:m.bvid,page:m.page,language:sourceLanguage,confirmedAt:Date.now()};workspace.changed({collection:true});m=getMaterial();overallScope(m);return structuredClone(m);
+     }
+     if(decision!=='audio')throw new Error('未确认完整字幕，未生成整体总结。');
+    }
+    onProgress('正在确认全片音轨与播放权限…');
+    const n=await getNativeStudySource();checked();
+    if(n.status!=='ready'||!nativeLive(n)||n.bvid!==m.bvid||n.cid!==m.cid)throw new Error('无法确认当前分P的完整可播放音轨；可导入完整字幕后再生成整体总结。');
+    if(n.playableDuration<n.duration-.02)throw new Error('当前仅可播放部分音轨，不能生成整体总结；已有结果保留。');
+    const preserve=materialSource==='asr'&&recognizedModel===(settings.asrModel||'small');
+    const reuseSession=preserve&&nativeMode&&asr.running&&nativeSession&&sameNativeBinding(n.binding,nativeSession.binding)&&n.source.url===nativeSession.source.url&&n.duration===nativeSession.duration&&n.playableDuration===nativeSession.playableDuration;
+    loopOff();video.pause();if(!reuseSession)startNative(n,preserve,true);checked();
+    onProgress('正在补齐全片字幕，已识别窗口和缓存会复用…');await asr.collectAll();checked();
+    m=getMaterial();overallScope(m);if(m.source!=='asr'||m.asrModel!==(settings.asrModel||'small'))throw new Error('识别来源已变化，未生成整体总结。');
+    return structuredClone(m);
+   }catch(error){if(owner.failure&&!signal.aborted)throw new Error('全片字幕准备失败，已有结果保留：'+owner.failure);throw error;}finally{signal.removeEventListener('abort',cancelled);if(fullPreparation===owner){fullPreparation=null;fullCollecting=false;workspace.changed({collection:true})}}
+  },
+  cancelCollection(){if(fullPreparation){fullPreparation=null;fullCollecting=false;if(asr.collecting)asr.cancelCollection()}},
   async jump(start,end){bindVideo();if(!video)throw new Error("找不到播放器");loopOff();await player.play({start:Math.max(0,start),end:Math.max(start+.01,end)})},
-  async words(c){const index=cues.findIndex(x=>x.start===c.start&&x.end===c.end&&x.text===c.text);if(index<0)throw new Error("原句已更新，请重新生成学习清单");ui.setPane("vocabulary");const t=await getTokenizer();await wordPanel.show(t.tokenize(c.text),sourceFor(c))},
+
   selectRelative(delta){guard();display(selected+delta,true)},
   async replay(intensive=false){const c=guard();loopOff();const segment=shifted(c);if(intensive)listeningPlayback={player,cue:segment};await player.play(segment)},
   clearListeningPlayback(){if(listeningPlayback?.player===player&&player?.cue===listeningPlayback.cue)player.clear();listeningPlayback=null},

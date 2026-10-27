@@ -1,9 +1,15 @@
 export type StudyLanguage = 'ja' | 'en';
 export interface LearningCue { id:string; revision:number; start:number; end:number; text:string; originalText?:string; edited?:boolean }
 export interface Span { start:number; end:number }
+export interface WholeSubtitleSource {
+ kind:'cc-track'|'confirmed-import'; identity:string; bvid:string; page:number; language:StudyLanguage;
+ trackId?:string; confirmedAt?:number;
+}
+export type OverallBasis = 'cc-track'|'confirmed-import'|'asr-complete';
 export interface VideoMaterial {
  version:1; key:string; route:string; identity:string; bvid:string; page:number; cid:string; language:StudyLanguage;
  title:string; duration:number; durationVerified?:boolean; offset:number; source:'cc'|'import'|'asr'; ranges:Span[]; cues:LearningCue[]; at:number;
+ wholeSource?:WholeSubtitleSource; asrModel?:string;
 }
 export const materialKey=(route:string,language:string)=>JSON.stringify([route,language]);
 export function mergeRanges(ranges:Span[]):Span[]{
@@ -13,13 +19,24 @@ export function mergeRanges(ranges:Span[]):Span[]{
  }return out;
 }
 export const timeLabel=(seconds:number)=>{const t=Math.max(0,Number.isFinite(seconds)?seconds:0);return Math.floor(t/3600)?`${Math.floor(t/3600)}:${String(Math.floor(t/60)%60).padStart(2,'0')}:${String(Math.floor(t)%60).padStart(2,'0')}`:`${Math.floor(t/60)}:${String(Math.floor(t)%60).padStart(2,'0')}`};
+export function overallBasis(m:VideoMaterial):OverallBasis|undefined {
+ const p=m.wholeSource;
+ if(p&&p.identity===m.identity&&p.bvid===m.bvid&&p.page===m.page&&p.language===m.language){
+  if(m.source==='cc'&&p.kind==='cc-track'&&typeof p.trackId==='string'&&p.trackId.trim())return 'cc-track';
+  if(m.source==='import'&&p.kind==='confirmed-import'&&Number.isFinite(p.confirmedAt)&&(p.confirmedAt||0)>0)return 'confirmed-import';
+ }
+ const ranges=mergeRanges(m.ranges||[]);
+ if(m.source==='asr'&&m.durationVerified===true&&Number.isFinite(m.duration)&&m.duration>0&&ranges.length===1&&ranges[0].start<=.02&&ranges[0].end>=m.duration-.02)return 'asr-complete';
+}
+export function overallBasisLabel(basis:OverallBasis){return basis==='cc-track'?'整轨 CC（未验证全部语音）':basis==='confirmed-import'?'用户确认完整的导入字幕（未验证全部语音）':'已处理全片音频'}
 export function materialCoverage(m:VideoMaterial){
  const ranges=mergeRanges(m.ranges),complete=m.source==='asr'&&m.durationVerified!==false&&m.duration>0&&ranges.length===1&&ranges[0].start<=.02&&ranges[0].end>=m.duration-.02;
  const rangeText=ranges.slice(0,6).map(r=>`${timeLabel(r.start)}–${timeLabel(r.end)}`).join('、')+(ranges.length>6?` 等${ranges.length}段`:'');
- return {complete,ranges,text:`${m.source==='cc'?'已取得字幕轨（完整性未核实）':m.source==='import'?'导入字幕（覆盖范围未核实）':complete?'已收集全片音轨':'部分字幕'} · ${m.cues.length} 句${rangeText?' · '+rangeText:''}`};
+ const basis=overallBasis(m);
+ return {complete,ranges,text:`${basis?overallBasisLabel(basis):m.source==='cc'?'已取得字幕轨（完整性未核实）':m.source==='import'?'导入字幕（覆盖范围未核实）':complete?'已收集全片音轨':'部分字幕'} · ${m.cues.length} 句${rangeText?' · '+rangeText:''}`};
 }
 export const cueFingerprint=(c:LearningCue)=>JSON.stringify([c.id,c.revision,c.start,c.end,c.text]);
-export const materialFingerprint=(m:VideoMaterial)=>JSON.stringify([m.key,m.identity,m.source,m.duration,m.offset,mergeRanges(m.ranges),m.cues.map(c=>[c.start,c.end,c.text])]);
+export const materialFingerprint=(m:VideoMaterial)=>JSON.stringify([m.key,m.identity,m.source,m.duration,m.offset,mergeRanges(m.ranges),m.cues.map(c=>[c.start,c.end,c.text]),...(m.wholeSource||m.asrModel?[m.wholeSource||null,m.asrModel||null]:[])]);
 export async function digest(value:unknown){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)));return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('')}
 export function validateMaterial(value:VideoMaterial):VideoMaterial{
  if(!value||value.version!==1||!['ja','en'].includes(value.language)||value.key!==materialKey(value.route,value.language)||!/^BV[\da-zA-Z]{10}:p\d+$/.test(value.route)||!['cc','import','asr'].includes(value.source)||!Array.isArray(value.cues)||value.cues.length>20000||!Array.isArray(value.ranges))throw new Error('字幕资料格式无效');

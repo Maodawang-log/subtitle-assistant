@@ -125,3 +125,5 @@
 :host([data-fullscreen]) #pane-video>.scroll>.learning-section{background:#1a2b23}
 :host([data-fullscreen]) #pane-video>.scroll>.learning-section>summary{color:#c6e4c4}
 :host([data-fullscreen]) .chapter-card{background:#203329}
+
+#importScopeDialog{max-width:min(460px,calc(100vw - 48px));border:1px solid var(--line);border-radius:12px;padding:20px;background:#fbfdfb;color:#24382d;font:14px/1.7 system-ui}#importScopeDialog::backdrop{background:#0b201a88}#importScopeDialog h3{margin:0 0 12px;font-size:17px}

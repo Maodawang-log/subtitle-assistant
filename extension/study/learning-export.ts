@@ -1,6 +1,7 @@
 import { buildSrt, buildTxt } from '../notes/render.js';
 import { formatTimestamp } from '../shared/string-utils.js';
 import { materialCoverage, mergeRanges, timeLabel, type VideoMaterial } from './learning-data.js';
+import { summaryScopeLabel } from './overall-summary.js';
 import { learningView, snapshotStale, type LearningSnapshot, type CitedBlock } from './learning-view.js';
 
 export type SubtitleFormat = 'srt' | 'vtt' | 'txt';
@@ -23,7 +24,7 @@ const offsetOf = (m: VideoMaterial) => Number.isFinite(m.offset) ? m.offset : 0;
 const shifted = (start: number, end: number, offset: number) => ({start:Math.max(0,start+offset), end:Math.max(0,end+offset)});
 export function coverageText(m: VideoMaterial & {cueCount?:number}) {
  const {complete} = materialCoverage(m), offset = offsetOf(m);
- const label = m.source==='cc' ? '已取得字幕轨（完整性未核实）' : m.source==='import' ? '导入字幕（覆盖范围未核实）' : complete ? '已收集全片音轨' : '部分字幕';
+ const label = materialCoverage(m).text.split(' · ')[0];
  const ranges = mergeRanges(m.ranges || []).map(r => shifted(r.start,r.end,offset)).filter(r => r.end>r.start);
  const count = m.cues?.length || m.cueCount;
  return `${label}${count !== undefined ? ` · ${count} 句` : ''} · ${ranges.length ? ranges.map(r=>`${timeLabel(r.start)}–${timeLabel(r.end)}`).join('、') : '未记录覆盖范围'}`;
@@ -65,14 +66,11 @@ export function exportLearningNotes(m:VideoMaterial,record:{summary?:LearningSna
  if(s?.material){
   const view=learningView(s);
   if(view.overview.length||view.chapters.length){
-   lines.push('## 总结与章节','',provenance(s,options.fingerprint,options.configuration));
+   lines.push('## 总结与章节','',`> ${oneLine(summaryScopeLabel(s))}`,'',provenance(s,options.fingerprint,options.configuration));
    for(const b of view.overview) lines.push(markdownText(b.text),'',citations(b,s.material),'');
    for(const c of view.chapters) lines.push(`### ${timeLink(s.material,c.cues[0].start)} ${oneLine(c.title)}`,'',markdownText(c.text),'',citations(c,s.material),'');
   }
-  if(view.learning.length){
-   lines.push('## 视频学习清单','',provenance(s,options.fingerprint,options.configuration));
-   for(const b of view.learning) lines.push(markdownText(b.text),'',citations(b,s.material),'');
-  }
+
  }
  const turns=(record.conversation||[]).filter(t=>t.material&&typeof t.question==='string');
  if(turns.length) lines.push('## 视频问答','');

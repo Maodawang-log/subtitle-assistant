@@ -17,6 +17,8 @@ export interface JapaneseCcResult {
   chineseCues?: StudyCue[];
   chineseWarning?: string;
   selectedTrackId?: string;
+  // Full response of the selected track; this does not verify all spoken audio.
+  wholeTrack?: true;
 }
 export class StudyCcError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -158,6 +160,7 @@ export function createJapaneseCcSource(deps: CcSourceDependencies) {
       }
     }
     guard();
+    result.wholeTrack = true;
     return result;
   };
 }

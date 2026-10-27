@@ -23,7 +23,7 @@ it('preserves new chapter titles while rejecting invented references and ambiguo
 it('retains repeated wording at distinct chapter times and distinct learning citations',()=>{
  const repeated=[{text:'再次强调同一观点',refs:['s1']},{text:'再次强调同一观点',refs:['s2']},{text:'再次强调同一观点',refs:['s1']}];
  const view=learningView({...snapshot,result:{...snapshot.result,chapters:repeated,learning:repeated}});
- expect(view.chapters.map(c=>c.cues[0].start)).toEqual([1.25,60]);expect(view.learning).toHaveLength(2);
+ expect(view.chapters.map(c=>c.cues[0].start)).toEqual([1.25,60]);expect(snapshot.result.learning).toHaveLength(1);
 });
 it.each(['srt','vtt','txt'] as const)('exports %s with applied offset, multilingual text and only supplied Chinese',format=>{
  const file=exportSubtitles(m,format,{c1:'已有中文'});
@@ -44,7 +44,7 @@ it('exports stale source snapshots, valid P/time links and optional current subt
  expect(file.text).toContain('先前结果');expect(file.text).toContain('当时覆盖：部分字幕');expect(file.text).not.toContain('0 句');
  expect(file.text).toContain('?p=3&t=3.75');expect(file.text).not.toContain('t=6.25');
  expect(file.text).toContain('当时的原句');expect(file.text).toContain('こんにちは。Hello 中文。');expect(file.text).toContain('中文：已有中文');
- expect(file.text).toContain('## 视频学习清单');expect(file.text).toContain('## 视频问答');expect(file.text).not.toContain('概述与要点');
+ expect(file.text).not.toContain('## 视频学习清单');expect(file.text).toContain('历史／局部总结');expect(file.text).toContain('## 视频问答');expect(file.text).not.toContain('概述与要点');
  expect(file.text).toContain('\\[跳转\\]\\(javascript:bad\\)');expect(file.text).toContain('&lt;script&gt;');
  expect(JSON.stringify(record)).toBe(before);
 });

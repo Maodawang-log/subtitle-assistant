@@ -9,6 +9,13 @@ const windowMessage = { type: "study-local-asr", action: "window", requestId: "o
 const requestWindow = { ...windowMessage, payload: { ...windowMessage.payload, backup_urls: [] } };
 
 describe("independent study message response contract", () => {
+  it('preserves only the validated opening-repair version so completed first windows can be reused from cache',async()=>{
+    for(const version of [1,2,'1',undefined]){
+      const answer=await sendStudyMessage(requestWindow,async()=>({ok:true,data:{timestamp_origin:'absolute',segments:[],opening_repair:{version,privateUrl:'https://private.invalid'}}}));
+      if(answer.ok)expect(answer.data.opening_repair).toEqual(version===1?{version:1}:undefined);
+      expect(JSON.stringify(answer)).not.toContain('private.invalid');
+    }
+  });
   it("maps each discriminated message to validated data without consumer assertions", async () => {
     const window = await sendStudyMessage(requestWindow, async () => ({ ok: true, data: {
       timestamp_origin: "absolute", segments: [{ start: 31, end: 33, text: "日本語" }], ignored: "field"
