@@ -13,7 +13,10 @@ const button=(text,fn,cls='')=>{const b=node('button',text,cls);b.onclick=()=>Pr
 export function createLearningWorkspace(ui,adapter){
  const {$}=ui;let epoch=0,job=null,record={conversation:[]},pinned=false,loadedKey='',saveTimer=0,restoring=false,loading=null;
  const listening=createListening(ui,adapter);
- const status=(text)=>{$('learningStatus').textContent=text};
+ const status=(text,error=false)=>{
+  $('learningStatus').textContent=text;
+  if(job||error){const visible=$('status');visible.textContent=text;visible.title=text;visible.classList.toggle('error',error);visible.setAttribute('role','status');visible.setAttribute('aria-live','polite')}
+ };
  ui.shadow.addEventListener('learning-error',e=>status(e.detail));
  const material=()=>adapter.material();
  const current=()=>adapter.current();
@@ -28,7 +31,7 @@ export function createLearningWorkspace(ui,adapter){
   if(job){job.controller.abort();if(job.phase==='committing')reason='校对已进入统一保存阶段；完成后可在校对记录整批撤销。';job=null;epoch++;void chrome.runtime.sendMessage({type:'study-learning-stop'});adapter.cancelCollection();status(reason)}renderBusy();
  }
  function renderBusy(){const busy=!!job;for(const b of ui.shadow.querySelectorAll('.cue-manual,.cue-proofread'))b.disabled=job?.phase==='committing';$('learningStop').hidden=!busy;$('batchStop').hidden=!busy;$('learningStop').disabled=job?.phase==='committing';$('batchStop').disabled=job?.phase==='committing';for(const id of ['summaryGenerate','chatSend','batchAll'])$(id).disabled=busy;}
- async function begin(label,fn){if(job)return;const token={epoch:++epoch,binding:adapter.binding(),configuration:adapter.configuration(),controller:new AbortController()};job=token;renderBusy();status(label);try{await load();checked(token);await fn(token)}catch(e){if(valid(token))status(e.name==='AbortError'?'已停止。':e.message)}finally{if(job===token){job=null;renderBusy()}}}
+ async function begin(label,fn){if(job)return;const token={epoch:++epoch,binding:adapter.binding(),configuration:adapter.configuration(),controller:new AbortController()};job=token;renderBusy();status(label);try{await load();checked(token);await fn(token)}catch(e){if(valid(token))status(e.name==='AbortError'?'已停止。':e.message,e.name!=='AbortError')}finally{if(job===token){job=null;renderBusy()}}}
  const checked=token=>{if(!valid(token))throw new DOMException('资料已更新，任务已停止','AbortError')};
  async function request(kind,evidence,m,token,extra={}){
   checked(token);const revision=await digest(materialFingerprint(m));checked(token);

@@ -459,7 +459,13 @@ import { renderMarkdown } from "../ui/markdown.js";
     }
     onProgress('正在确认全片音轨与播放权限…');
     const n=await getNativeStudySource();checked();
-    if(n.status!=='ready'||!nativeLive(n)||n.bvid!==m.bvid||n.cid!==m.cid)throw new Error('无法确认当前分P的完整可播放音轨；可导入完整字幕后再生成整体总结。');
+    if(n.status!=='ready'){
+     const reason=/^[A-Z0-9_]{1,48}$/.test(n.reason)?n.reason:'UNAVAILABLE';
+     const message=String(n.message||'当前播放音轨尚未建立关联，请正常播放几秒后重试。').replace(/https?:\/\/\S+/g,'[音轨地址]').slice(0,300);
+     throw new Error('暂时无法准备整体总结 ['+reason+']：'+message);
+    }
+    if(!nativeLive(n))throw new Error('暂时无法准备整体总结 [PLAYER_CHANGED]：播放页面或音轨已更新，请刷新视频页并重新开启字幕后重试。');
+    if(n.bvid!==m.bvid||n.cid!==m.cid)throw new Error('暂时无法准备整体总结 [RESOURCE_MISMATCH]：当前播放音轨与字幕资料不是同一个分P，请刷新视频页并重新开启字幕。');
     if(n.playableDuration<n.duration-.02)throw new Error('当前仅可播放部分音轨，不能生成整体总结；已有结果保留。');
     const preserve=materialSource==='asr'&&recognizedModel===(settings.asrModel||'small');
     const reuseSession=preserve&&nativeMode&&asr.running&&nativeSession&&sameNativeBinding(n.binding,nativeSession.binding)&&n.source.url===nativeSession.source.url&&n.duration===nativeSession.duration&&n.playableDuration===nativeSession.playableDuration;

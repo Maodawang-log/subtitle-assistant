@@ -86,6 +86,13 @@ it('rejects a preview before starting full collection or AI',async()=>{
  transport.mode='asr';transport.native.englishTrackCount=0;transport.native.playableDuration=30;transport.native.audit.previewSeconds=30;await enable();await vi.waitFor(()=>expect(transport.requests).toEqual([0]));
  ($('summaryGenerate') as HTMLElement).click();await vi.waitFor(()=>expect($('learningStatus')!.textContent).toContain('仅可播放部分'));expect(aiCalls()).toHaveLength(0);expect(transport.requests).toEqual([0]);
 });
+it('shows the exact native preparation failure in the visible header without submitting AI',async()=>{
+ transport.mode='asr';transport.native.englishTrackCount=0;await enable();await vi.waitFor(()=>expect(transport.requests).toEqual([0,30]));
+ transport.native={status:'unavailable',reason:'NO_PLAYED_AUDIO',message:'当前播放音轨尚未建立关联，请正常播放几秒后重试。'};
+ ($('summaryGenerate') as HTMLElement).click();await vi.waitFor(()=>expect($('status')!.textContent).toContain('[NO_PLAYED_AUDIO]'));
+ expect($('status')!.textContent).toContain('当前播放音轨尚未建立关联');expect($('status')!.classList.contains('error')).toBe(true);
+ expect($('learningStatus')!.textContent).toBe($('status')!.textContent);expect(aiCalls()).toHaveLength(0);expect(transport.requests).toEqual([0,30]);
+});
 it('starts overall collection from the beginning even when playback is already at the end',async()=>{
  transport.mode='asr';transport.native.englishTrackCount=0;video.currentTime=90;Object.defineProperty(video,'ended',{configurable:true,value:true});await enable();expect(transport.requests).toEqual([]);
  ($('summaryGenerate') as HTMLElement).click();await vi.waitFor(()=>expect(aiCalls()).toHaveLength(1));expect(transport.requests).toEqual([0,30,60]);expect(video.currentTime).toBe(90);expect(aiCalls()[0].overall.basis).toBe('asr-complete');

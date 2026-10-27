@@ -29,6 +29,17 @@ describe("current-player audio association",()=>{
   expect(result).toMatchObject({bvid:bv,cid,playableDuration:30,subtitleListPresent:true,japaneseTrackCount:0,source:{url:source,backupUrls:[]},audit:{exactUrlMatch:true,responseStatus:206,cidPathMatch:true}});
   expect(readNativeSourceResult(result)).toEqual(result);
  });
+ it('accepts a qe-prefixed audio filename with the exact current CID and observed 206 URL',()=>{
+  const currentCid='43077010356',url='https://example.bilivideo.com/upgcxcode/56/03/43077010356/43077010356_qe1-1-30216.m4s?synthetic=fixture';
+  vd.cid=currentCid;vd.pages[0].cid=currentCid;info.dash.audio[0].baseUrl=url;entries[0].name=url;
+  for(const version of [1,2]){const current=url.replace('_qe1-','_qe'+version+'-');info.dash.audio[0].baseUrl=current;entries[0].name=current;expect(readNativeStudyPage()).toMatchObject({status:'ready',cid:currentCid,source:{url:current},playableDuration:30});}
+  info.dash.audio[0].baseUrl=url;
+  entries[0].name=url.replace('synthetic=fixture','synthetic=other');expect(readNativeStudyPage()).toMatchObject({reason:'NO_PLAYED_AUDIO'});
+  for(const wrong of ['430770103560_qe1-','43077010356_qeX-','43077010356_qe-']){
+   info.dash.audio[0].baseUrl=url.replace('43077010356_qe1-',wrong);entries[0].name=info.dash.audio[0].baseUrl;
+   expect(readNativeStudyPage()).toMatchObject({reason:'NO_PLAYED_AUDIO'});
+  }
+ });
  it("rejects old request completed after a later A→B→A route epoch",()=>{
   state.routeEpoch=2;state.epochStart=1050;entries[0].responseEnd=1100;expect(readNativeStudyPage()).toMatchObject({status:"unavailable",reason:"NO_PLAYED_AUDIO"});
  });

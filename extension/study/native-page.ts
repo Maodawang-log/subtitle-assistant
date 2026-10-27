@@ -36,7 +36,7 @@ export function readNativeStudyPage(){
  if(!Number.isFinite(playableDuration)||playableDuration<=0)return no("PREVIEW_UNKNOWN","无法确认可播放范围。");
  const validUrl=(value:unknown)=>{
   if(typeof value!=="string"||value.length>8192)return false;
-  try{const x=new URL(value);return x.protocol==="https:"&&!x.username&&!x.password&&!x.port&&(x.hostname==="upos-hz-mirrorakam.akamaized.net"||["bilivideo.com","bilivideo.cn"].some(h=>x.hostname===h||x.hostname.endsWith("."+h)))&&new RegExp("^/upgcxcode/\\d+/\\d+/"+cid+"/"+cid+"-[^/]+\\.m4s$").test(x.pathname)}catch{return false}
+  try{const x=new URL(value);return x.protocol==="https:"&&!x.username&&!x.password&&!x.port&&(x.hostname==="upos-hz-mirrorakam.akamaized.net"||["bilivideo.com","bilivideo.cn"].some(h=>x.hostname===h||x.hostname.endsWith("."+h)))&&new RegExp("^/upgcxcode/\\d+/\\d+/"+cid+"/"+cid+"(?:_qe\\d+)?-[^/]+\\.m4s$").test(x.pathname)}catch{return false}
  };
  const resources=performance.getEntriesByType("resource") as Array<PerformanceResourceTiming&{responseStatus?:number}>;
  const audio=info?.dash?.audio;if(!Array.isArray(audio))return no("NO_AUDIO");
