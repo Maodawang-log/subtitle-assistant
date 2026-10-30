@@ -14,6 +14,7 @@ import { createInlineRecorder } from "./inline-recorder.js";
 import { createWordPanel } from "./word-panel.js";
 import { createSubtitleSelection } from "./subtitle-selection.js";
 import { correctionStorageKey, withCorrection, createCorrectionWriter } from "./manual-corrections.js";
+import { isStudyRecord } from "./messaging.js";
 import { createCueTimeline } from "./cue-revisions.js";
 import { APPEARANCE_KEY,normalizeAppearance,appearanceCss } from "./appearance.js";
 import { createProofreader } from "./proofreader.js";
@@ -120,13 +121,32 @@ import { renderMarkdown } from "../ui/markdown.js";
   if(notifyProof)proofreader.changed();
   if(!cues.length){$("rows").replaceChildren(currentElement,chineseElement);currentElement.removeAttribute("data-study-text");currentElement.textContent="当前片段没有识别到台词。";chineseElement.textContent="";$("position").textContent="暂无台词"}
  }
- function editCue(id,revision,text,persist=true){
-  const before=cues.find(c=>c.id===id),updated=timeline.edit(id,revision,text);if(!updated)return null;
-  corrections=withCorrection(corrections,identity,updated);
-  if(persist)void writeCorrection(correctionStorageKey(route,sourceLanguage),identity,updated).catch(e=>status("字幕已修改，但本地保存失败："+e.message,true));
+ function editCue(id,revision,text,persist=true,restoreMerged=false){
+  const before=cues.find(c=>c.id===id),updated=timeline.edit(id,revision,text,restoreMerged);if(!updated)return null;
+  const saved=restoreMerged?{...before,restoreMerged:true}:updated;
+  corrections=withCorrection(corrections,identity,saved);
+  if(persist)void writeCorrection(correctionStorageKey(route,sourceLanguage),identity,saved).catch(e=>status("字幕已修改，但本地保存失败："+e.message,true));
   translations.delete(cueKey(before));cues=timeline.cues;
   if(updated.edited)invalidChinese.add(id);else invalidChinese.delete(id);
   invalidateCueWork(false);workspace?.changed({batchOwn:batchApplying});display(selected,true);updateAtTime(true);status(updated.edited?"已采用校对；原文可恢复。":"已恢复原始字幕。");return updated;
+ }
+ async function mergeWithNextCue(id,revision,text,valid){
+  const index=cues.findIndex(c=>c.id===id);
+  if(index<0||index>=cues.length-1)throw new Error("这是最后一句，没有可以合并的下一句");
+  const first=cues[index],second=cues[index+1],plan=timeline.prepareMergeNext(id,revision,text);
+  if(!plan)throw new Error("字幕已更新，请取消后重新编辑。");
+  await writeCorrection(correctionStorageKey(route,sourceLanguage),identity,plan.merged);
+  if(!valid()||cues[index+1]?.id!==second.id||cues[index+1]?.revision!==second.revision)throw new Error("合并已保存；字幕在保存时更新，请取消后重新载入。");
+  const res=timeline.mergeNext(id,revision,text);
+  if(!res)throw new Error("字幕已更新，请重新载入。");
+  manualDraft=null;
+  corrections=withCorrection(corrections,identity,res.merged);
+  translations.delete(cueKey(first));translations.delete(cueKey(second));invalidChinese.delete(second.id);
+  cues=timeline.cues;invalidChinese.add(res.merged.id);
+  invalidateCueWork(false);workspace?.changed({batchOwn:batchApplying});
+  display(Math.min(selected,cues.length-1),true);updateAtTime(true);
+  status("已将当前句与下一句合并。");
+  return res.merged;
  }
  function bindVideo(){
   const list=[...document.querySelectorAll("video")].map(v=>({v,r:v.getBoundingClientRect()})).filter(x=>x.r.width>50&&x.r.height>50).sort((a,b)=>b.r.width*b.r.height-a.r.width*a.r.height);
@@ -176,10 +196,33 @@ import { renderMarkdown } from "../ui/markdown.js";
   $("rows").replaceChildren(currentElement,chineseElement);currentElement.textContent="开启后显示"+languageName()+"字幕";chineseElement.textContent="";$("position").textContent="未载入";syncLanguageLabels();
 
  }
+ async function ensureAsrServiceReady(onStatus:(msg:string)=>void,isCurrent=()=>true,signal=abort?.signal){
+  const owner=binding(),config=configurationEpoch,model=settings.asrModel||"small",language=sourceLanguage;
+  const checked=()=>{if(!enabled||signal?.aborted||binding()!==owner||configurationEpoch!==config||!isCurrent())throw new DOMException("已取消","AbortError")};
+  const ready=ping=>isStudyRecord(ping)&&ping.ok===true&&isStudyRecord(ping.data)&&!ping.data.foreign;
+  const ping=async()=>{checked();let value;try{value=await send({type:"study-local-asr",action:"health",requestId:crypto.randomUUID()})}catch{}checked();if(value?.ok&&value.data?.foreign)throw new Error("本地端口由其他服务使用，请在设置中检查。");return value};
+  if(ready(await ping()))return true;
+  onStatus("本地识别服务未启动，正在自动唤醒模型…");
+  checked();
+  const startRes=await send({type:"study-model-manager",action:"start",args:{model,language}});checked();
+  if(!startRes?.ok)throw new Error("未能自动拉起本地识别服务："+(startRes?.error||"请在设置中检查配套连接。"));
+  const deadline=Date.now()+45000;
+  while(Date.now()<deadline){
+   checked();
+   await new Promise<void>(resolve=>{const done=()=>{clearTimeout(timer);signal?.removeEventListener('abort',done);resolve()},timer=setTimeout(done,1000);signal?.addEventListener('abort',done,{once:true})});
+   checked();
+    if(ready(await ping())){
+     onStatus("本地模型已就绪，正在准备字幕…");
+     return true;
+    }
+  }
+  throw new Error("等待本地识别服务启动超时，请在设置中检查服务状态。");
+ }
  async function start(preferredTrackId="",refresh=false){
   await settingsReady;
   if(enabled&&loading)return;
   stop();updateTrackChoices();timeline.clear();invalidChinese.clear();cues=[];chinese=[];enabled=true;const mine=++generation;abort=new AbortController();loading=true;
+  const signal=abort.signal,ready=()=>ensureAsrServiceReady(status,()=>mine===generation,signal);
   $("enable").textContent="关闭字幕";$("enable").classList.add("on");wrap.classList.remove("fold");bindVideo();ui.setEnabled(true);ui.mount(video);
   status("字幕已开启，正在获取当前视频的"+languageName()+"字幕…");
   let nativeFallback=null;
@@ -194,21 +237,22 @@ import { renderMarkdown } from "../ui/markdown.js";
    if(!preferredTrackId&&savedMaterial.document?.source==="import"&&savedMaterial.document.identity===route){restoreMaterial(savedMaterial.document);void workspace.load().catch(e=>status(e.message,true));return;}
    const native=await getNativeStudySource();nativeFallback=native;
    if(mine!==generation||!enabled||currentRoute()!==route)return;
-   if(!preferredTrackId&&savedMaterial.document&&native.status==="ready"&&savedMaterial.document.identity===native.bvid+":"+native.cid){restoreMaterial(savedMaterial.document);if(materialSource==="asr"&&!materialCoverage(savedMaterial.document).complete)startNative(native,true);void workspace.load().catch(e=>status(e.message,true));status("已恢复"+(savedMaterial.pinned?"长期保存":"临时缓存")+"字幕 · "+materialCoverage(savedMaterial.document).text);return;}
+   if(!preferredTrackId&&savedMaterial.document&&native.status==="ready"&&savedMaterial.document.identity===native.bvid+":"+native.cid){restoreMaterial(savedMaterial.document);if(materialSource==="asr"&&!materialCoverage(savedMaterial.document).complete){await ready();if(mine!==generation||!enabled)return;startNative(native,true);}void workspace.load().catch(e=>status(e.message,true));status("已恢复"+(savedMaterial.pinned?"长期保存":"临时缓存")+"字幕 · "+materialCoverage(savedMaterial.document).text);return;}
    if(!preferredTrackId&&native.status==="ready"&&native.subtitleListPresent&&(sourceLanguage==="ja"?native.japaneseTrackCount:native.englishTrackCount)===0&&nativeLive(native)){
-    startNative(native);return;
+    await ready();if(mine!==generation||!enabled)return;startNative(native);return;
    }
    const result=await getJapaneseCc({language:sourceLanguage,signal:abort.signal,preferredTrackId,includeChinese:true,onStatus:text=>{if(enabled&&mine===generation)status(text)}});
    if(mine!==generation||!enabled)return;
    clip=result;identity=result.bvid+":"+result.cid;
-   if(!preferredTrackId&&savedMaterial.document&&savedMaterial.document.identity===identity){restoreMaterial(savedMaterial.document);if(materialSource==="asr"&&!materialCoverage(savedMaterial.document).complete){asrMode=true;asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:video?.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity,completedWindows:recognizedWindows});}void workspace.load().catch(e=>status(e.message,true));status("已恢复"+(savedMaterial.pinned?"长期保存":"临时缓存")+"字幕 · "+materialCoverage(savedMaterial.document).text);return;}
+   if(!preferredTrackId&&savedMaterial.document&&savedMaterial.document.identity===identity){restoreMaterial(savedMaterial.document);if(materialSource==="asr"&&!materialCoverage(savedMaterial.document).complete){await ready();if(mine!==generation||!enabled)return;asrMode=true;asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:video?.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity,completedWindows:recognizedWindows});}void workspace.load().catch(e=>status(e.message,true));status("已恢复"+(savedMaterial.pinned?"长期保存":"临时缓存")+"字幕 · "+materialCoverage(savedMaterial.document).text);return;}
    updateTrackChoices(result.status==="ready"?result.tracks:[],result.selectedTrackId||"");
    if(result.status==="ready"){
     materialSource="cc";wholeSource=result.wholeTrack?{kind:"cc-track",identity,bvid:result.bvid,page:videoMeta().page,language:sourceLanguage,trackId:result.selectedTrackId}:null;cues=loadCorrected(JSTUDY.normalize(result.cues),identity+"|"+sourceLanguage);chinese=JSTUDY.normalize(result.chineseCues||[]);
     $("source").textContent="B站"+languageName()+"文本轨 · "+result.title;updateAtTime(true);status(languageName()+"字幕已就绪；可单独开启双语字幕。");
    }else{
-    if(native.status==="ready"&&native.bvid===result.bvid&&native.cid===result.cid&&nativeLive(native)){startNative(native);return;}
     if(native.status==="unavailable"&&["PREVIEW_END","PREVIEW_UNKNOWN"].includes(native.reason))throw new Error(native.message);
+    await ready();if(mine!==generation||!enabled)return;
+    if(native.status==="ready"&&native.bvid===result.bvid&&native.cid===result.cid&&nativeLive(native)){startNative(native);return;}
     materialSource="asr";wholeSource=null;recognizedModel=settings.asrModel||"small";asrMode=true;$("source").textContent="本地 Whisper · "+result.title;waitForCurrent();
     asr.start({enabled:true,bvid:result.bvid,cid:result.cid,currentTime:video?.currentTime||0,duration:Number.isFinite(video?.duration)?Math.min(video.duration,result.duration||Infinity):result.duration,language:sourceLanguage,model:settings.asrModel||"small",resourceId:identity});
    }
@@ -242,15 +286,34 @@ import { renderMarkdown } from "../ui/markdown.js";
    if(!valid()){error.textContent="这句字幕已更新，请取消后重新编辑。";return}
    draft.saving=true;save.disabled=true;cancel.disabled=true;input.disabled=true;
    try{
-    await writeCorrection(correctionStorageKey(route,sourceLanguage),identity,{...c,text});
+    await writeCorrection(correctionStorageKey(route,sourceLanguage),identity,{...c,text,...(draft.restoreMerged?{restoreMerged:true}:{})});
     if(!valid()){error.textContent="修改已保存；字幕在保存时发生更新，请取消后重新载入字幕。";return}
-    manualDraft=null;editCue(c.id,c.revision,text,false);proofreader.changed();status(text===c.originalText?"已恢复原文。":"人工校对已保存。");
+    manualDraft=null;editCue(c.id,c.revision,text,false,!!draft.restoreMerged);proofreader.changed();status(text===c.originalText?"已恢复原文。":"人工校对已保存。");
    }catch(e){error.textContent="未能保存，请重试："+e.message}
    finally{draft.saving=false;save.disabled=false;cancel.disabled=false;input.disabled=false}
   };
   input.onkeydown=e=>{if(e.isComposing)return;if(e.key==="Escape"){e.preventDefault();cancel.click()}else if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();save.click()}};
   actions.append(save,cancel);
-  if(c.edited){const restore=document.createElement("button");restore.className="cue-edit-restore";restore.textContent="恢复原文";restore.onclick=()=>{if(!draft.saving){input.value=c.originalText;save.click()}};actions.append(restore)}
+  input.oninput=()=>{draft.restoreMerged=false};
+  if(index<cues.length-1){
+   const mergeBtn=document.createElement("button");mergeBtn.className="cue-edit-merge";mergeBtn.textContent="与下句合并";
+   mergeBtn.title="将下一句字幕合并到本句末尾，并延长本句时间轴";
+   mergeBtn.onclick=async()=>{
+    if(draft.saving)return;
+    const text=input.value.trim(),valid=()=>manualDraft===draft&&binding()===draft.binding&&cues.some(item=>item.id===draft.id&&item.revision===draft.revision);
+    if(!text){error.textContent="正文不能为空。";return}
+    if(!valid()){error.textContent="字幕已更新，请取消后重新编辑。";return}
+    draft.saving=true;save.disabled=true;cancel.disabled=true;mergeBtn.disabled=true;input.disabled=true;
+    try{
+     await mergeWithNextCue(c.id,c.revision,text,valid);
+    }catch(e){
+     error.textContent="合并失败："+e.message;
+     draft.saving=false;save.disabled=false;cancel.disabled=false;mergeBtn.disabled=false;input.disabled=false;
+    }
+   };
+   actions.append(mergeBtn);
+  }
+  if(c.edited){const restore=document.createElement("button");restore.className="cue-edit-restore";restore.textContent="恢复原文";restore.onclick=()=>{if(!draft.saving){draft.restoreMerged=!!c.mergedFrom;input.value=c.originalText;save.click()}};actions.append(restore)}
   target.replaceChildren(input,actions,error);input.focus();input.setSelectionRange(input.value.length,input.value.length);
  }
  function renderRows(){
@@ -485,6 +548,7 @@ import { renderMarkdown } from "../ui/markdown.js";
     if(n.bvid!==m.bvid||n.cid!==m.cid)throw new Error('暂时无法准备整体总结 [RESOURCE_MISMATCH]：当前播放音轨与字幕资料不是同一个分P，请刷新视频页并重新开启字幕。');
     if(n.playableDuration<n.duration-.02)throw new Error('当前仅可播放部分音轨，不能生成整体总结；已有结果保留。');
     const preserve=materialSource==='asr'&&recognizedModel===(settings.asrModel||'small');
+    await ensureAsrServiceReady(onProgress,()=>{checked();return true},signal);checked();
     const reuseSession=preserve&&nativeMode&&asr.running&&nativeSession&&sameNativeBinding(n.binding,nativeSession.binding)&&n.source.url===nativeSession.source.url&&n.duration===nativeSession.duration&&n.playableDuration===nativeSession.playableDuration;
     loopOff();video.pause();if(!reuseSession)startNative(n,preserve,true);checked();
     onProgress('正在补齐全片字幕，已识别窗口和缓存会复用…');await asr.collectAll();checked();

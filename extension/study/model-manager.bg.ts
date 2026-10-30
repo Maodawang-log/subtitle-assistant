@@ -9,6 +9,10 @@ export function isManagerSettingsSender(sender: chrome.runtime.MessageSender & {
  if(sender.id!==runtime.id||!sender.url||sender.frameId!==undefined&&sender.frameId!==0)return false;
  try {const url=new URL(sender.url),expected=new URL(chrome.runtime.getURL("study/options.html"));return url.origin===expected.origin&&url.host===expected.host&&url.pathname===expected.pathname&&url.protocol===expected.protocol;}catch{return false}
 }
+function isManagerContentSender(sender: chrome.runtime.MessageSender & {frameId?:number}) {
+ if(sender.id!==runtime.id||sender.frameId!==0||!Number.isInteger(sender.tab?.id)||(sender.tab?.id??-1)<0||!sender.url)return false;
+ try {const url=new URL(sender.url);return url.protocol==='https:'&&url.hostname==='www.bilibili.com'&&!url.port&&!url.username&&!url.password&&(/^\/(?:[^/]+\/)?video\/BV[\da-zA-Z]{10}\/?$/.test(url.pathname)||url.pathname==='/list/watchlater');}catch{return false}
+}
 function nativeRequest(action:string,args:Record<string,unknown>){
  return new Promise(resolve=>{
   try{
@@ -24,7 +28,10 @@ function nativeRequest(action:string,args:Record<string,unknown>){
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  if(!isStudyRecord(message)||message.type!=="study-model-manager")return;
- if(!isManagerSettingsSender(sender)){reply({ok:false,error:"模型管理仅允许从本扩展设置页操作。"});return false}
  if(typeof message.action!=="string"||!actions.has(message.action)||!isStudyRecord(message.args)){reply({ok:false,error:"不支持的模型管理操作。"});return false}
+ if(!isManagerSettingsSender(sender)){
+  const args=message.args;
+  if(!isManagerContentSender(sender)||message.action!=='start'||Object.keys(args).some(key=>!['model','language'].includes(key))||typeof args.model!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(args.model)||(args.language!=='ja'&&args.language!=='en')){reply({ok:false,error:"网页仅允许启动当前语言的本地识别服务；其他模型管理操作请使用设置页。"});return false}
+ }
  nativeRequest(message.action,message.args).then(reply);return true;
 });

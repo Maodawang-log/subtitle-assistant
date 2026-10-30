@@ -29,7 +29,7 @@ beforeEach(async () => {
   vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   disk = new Map([["biliscriptJapaneseSettings", { sourceLanguage: "en", asrModel: "medium" }]]);
   aiReply = async () => ({ ok: true, text: "Root explanation" });
-  send = vi.fn(async (message: any) => message.type === "study-settings-public" ? { ok: true, config: { sourceLanguage: "en", asrModel: "medium", configured: true } } : message.type === "study-ai" ? aiReply(message) : { ok: true, entries: [] });
+  send = vi.fn(async (message: any) => message.type === "study-settings-public" ? { ok: true, config: { sourceLanguage: "en", asrModel: "medium", configured: true } } : message.type === "study-ai" ? aiReply(message) : message.type === "study-local-asr" && message.action === "health" ? { ok: true, data: { foreign: false } } : { ok: true, entries: [] });
   vi.stubGlobal("chrome", { runtime: { getURL: (path: string) => `chrome-extension://root-review/${path}`, sendMessage: send, onMessage: { addListener: (listener: any) => { receive = listener; } } }, storage: { local: createMemoryStorageArea(disk), onChanged: { addListener: vi.fn() } } });
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({}) })));
   vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
@@ -48,6 +48,37 @@ afterEach(() => {
   vi.clearAllTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers();
   for (const id of ["biliscript-japanese-study", "biliscript-study-slot", "biliscript-study-controls", "biliscript-study-entry", "biliscript-study-overlay"]) document.getElementById(id)?.remove();
   document.body.replaceChildren();
+});
+
+it.each(['stop','video'])('does not wake an old session after %s while its first health request is pending',async reason=>{
+ let resolve!:(v:any)=>void;const held=new Promise(r=>resolve=r),original=send.getMockImplementation() as (m:any)=>Promise<any>;
+ send.mockImplementation((m:any)=>m.type==='study-local-asr'&&m.action==='health'?held:original(m));
+ $('enable').click();await flush();
+ if(reason==='stop')$('enable').click();else{history.replaceState({},'','https://www.bilibili.com/video/BV1wYAmeqEuV/');await vi.advanceTimersByTimeAsync(1500)}
+ resolve({ok:false});await flush();expect(send.mock.calls.filter(([m])=>m.type==='study-model-manager')).toHaveLength(0);expect(transport.sessions).toHaveLength(0);
+});
+it('stops readiness polling after captions are disabled and starts only the captured model on success',async()=>{
+ const original=send.getMockImplementation() as (m:any)=>Promise<any>;let healthy=false;
+ send.mockImplementation((m:any)=>m.type==='study-local-asr'&&m.action==='health'?Promise.resolve(healthy?{ok:true,data:{foreign:false}}:{ok:false}):original(m));
+ $('enable').click();await flush();expect(send.mock.calls.filter(([m])=>m.type==='study-model-manager')).toHaveLength(1);$('enable').click();await flush();
+ const count=send.mock.calls.filter(([m])=>m.type==='study-local-asr').length;await vi.advanceTimersByTimeAsync(2000);expect(send.mock.calls.filter(([m])=>m.type==='study-local-asr')).toHaveLength(count);
+ $('enable').click();await flush();healthy=true;await vi.advanceTimersByTimeAsync(1000);await flush();expect(transport.sessions).toHaveLength(1);expect(transport.sessions[0]).toMatchObject({model:'medium',language:'en'});
+});
+it('persists manual merge drafts across reload and restores both original sentences',async()=>{
+ $('enable').click();await flush();
+ const raw=[{from:1,to:3,content:'First sentence.'},{from:3.1,to:5,content:'Second sentence.'}],meta={resourceId:identity,bvid:'BV1ab411c7mD',cid:'111',language:'en',model:'medium',windowStart:0,duration:30};
+ transport.callbacks.onCues(raw,meta);await flush();
+ ($('rows').querySelectorAll('.cue-manual')[1] as HTMLElement).click();($('rows').querySelector('.cue-editor') as HTMLTextAreaElement).value='Edited second.';($('rows').querySelector('.cue-edit-save') as HTMLElement).click();await flush();
+ ($('rows').querySelector('.cue-manual') as HTMLElement).click();($('rows').querySelector('.cue-editor') as HTMLTextAreaElement).value='Draft first.';($('rows').querySelector('.cue-edit-merge') as HTMLElement).click();await flush();
+ expect(rows()).toEqual(['Draft first. Edited second.']);expect(disk.get('biliscript-study-corrections:en:BV1ab411c7mD:p1')[identity]).toHaveLength(1);
+ $('enable').click();await flush();$('enable').click();await flush();transport.callbacks.onCues(raw,meta);await flush();expect(rows()).toEqual(['Draft first. Edited second.']);
+ ($('rows').querySelector('.cue-manual') as HTMLElement).click();($('rows').querySelector('.cue-edit-restore') as HTMLElement).click();await flush();expect(rows()).toEqual(['First sentence.','Second sentence.']);expect(disk.get('biliscript-study-corrections:en:BV1ab411c7mD:p1')[identity]).toEqual([]);
+});
+it('retains the edited draft and both cues when merge storage fails',async()=>{
+ $('enable').click();await flush();transport.callbacks.onCues([{from:1,to:3,content:'First.'},{from:4,to:6,content:'Second.'}],{resourceId:identity,language:'en',model:'medium',windowStart:0,duration:30});await flush();
+ const area=chrome.storage.local,save=area.set.bind(area);vi.spyOn(area,'set').mockImplementation(((data:any)=>Object.keys(data).some(k=>k.startsWith('biliscript-study-corrections:'))?Promise.reject(new Error('disk full')):save(data)) as any);
+ ($('rows').querySelector('.cue-manual') as HTMLElement).click();($('rows').querySelector('.cue-editor') as HTMLTextAreaElement).value='Draft survives.';($('rows').querySelector('.cue-edit-merge') as HTMLElement).click();await flush();
+ expect(($('rows').querySelector('.cue-editor') as HTMLTextAreaElement).value).toBe('Draft survives.');expect($('rows').querySelectorAll('.cue')).toHaveLength(2);expect($('rows').textContent).toContain('disk full');expect(($('rows').querySelector('.cue-edit-cancel') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("opens the browser entry without submitting CC, audio or paid work and honors the saved English default on enable", async () => {

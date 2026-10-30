@@ -111,6 +111,7 @@ beforeEach(async () => {
     if (message.type === "study-settings-public") return { ok: true, config: settings };
     if (message.type === "study-ai") return ai(message);
     if (message.type === "study-native-source") return nativeSource();
+    if (message.type === "study-local-asr" && message.action === "health") return { ok: true, data: { foreign: false } };
     if (message.action === "studyOpenRecorder") return { success: true };
     return { ok: true };
   });
@@ -553,7 +554,8 @@ describe("validated native-audio UI integration", () => {
     expect(element("detail").querySelector("strong")?.textContent).toBe("重点");
     expect(element("detail").querySelector("details")?.open).toBe(false);
     expect(element("detail").querySelector("img")).toBeNull();
-    expect(element("explainScope").textContent).toContain("五句");
+    expect(element("explainScope").textContent).toBe("AI");
+    expect(element("detailTitle").textContent).toBe("邻近几句讲解");
   });
   it("hides all learning UI in fullscreen when disabled without starting work",async()=>{
     Object.defineProperty(document,"fullscreenElement",{configurable:true,value:video.parentElement});

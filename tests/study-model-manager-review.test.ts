@@ -58,6 +58,20 @@ it("rejects arbitrary management actions and non-object payloads before contacti
   expect(connect).not.toHaveBeenCalled();
 });
 
+const content={id,url:'https://www.bilibili.com/video/BV1ab411c7mD/',frameId:0,tab:{id:12}};
+it('lets a valid top-level study page start only with a model and source language',async()=>{
+ const result=dispatch('start',content,{model:'large-v3-turbo',language:'ja'});expect(result.handled).toBe(true);
+ const request=post.mock.calls[0][0];expect(request).toMatchObject({action:'start',args:{model:'large-v3-turbo',language:'ja'}});
+ onNative({id:request.id,ok:true});await Promise.resolve();expect(result.reply).toHaveBeenCalledWith(expect.objectContaining({ok:true}));
+});
+it.each(['status','download','delete','prepareDelete','chooseDirectory','chooseImport','refreshCatalog','cancel','setDefault','setLegacyDefault','stop','handover','restart'])('rejects content action %s before opening native messaging',action=>{
+ expect(dispatch(action,content,{model:'medium',language:'en'}).reply).toHaveBeenCalledWith(expect.objectContaining({ok:false}));expect(connect).not.toHaveBeenCalled();
+});
+it('rejects iframes, unrelated pages and extra start arguments',()=>{
+ for(const sender of [{...content,frameId:1},{...content,id:'b'.repeat(32)},{...content,url:'https://evil.invalid/video/BV1ab411c7mD/'},{...content,url:'https://www.bilibili.com/'},{...content,url:'https://www.bilibili.com:444/video/BV1ab411c7mD/'},{...content,tab:{id:-1}}])expect(dispatch('start',sender,{model:'medium',language:'ja'}).reply).toHaveBeenCalledWith(expect.objectContaining({ok:false}));
+ for(const args of [{model:'../model',language:'ja'},{model:'medium',language:'zh'},{model:'medium',language:'ja',confirm:'anything'},{language:'ja'}])expect(dispatch('start',content,args).reply).toHaveBeenCalledWith(expect.objectContaining({ok:false}));expect(connect).not.toHaveBeenCalled();
+});
+
 it("routes concurrent native responses by request id and ignores unrelated native output", async () => {
   const first = dispatch(), second = dispatch("start", settings, { model: "medium" });
   expect(first.handled).toBe(true);

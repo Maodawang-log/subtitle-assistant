@@ -347,6 +347,36 @@ describe("bounded playback-window ASR", () => {
   });
 });
 
+describe('bounded reconnection',()=>{
+ const originalChrome=chrome;
+ const mockManager=(fn:(message:any)=>Promise<any>)=>{const send=vi.fn((message:any,reply?:(data:any)=>void)=>{const result=fn(message);if(reply)void result.then(reply);return result});vi.stubGlobal('chrome',{runtime:{sendMessage:send}});return send};
+ afterEach(()=>{vi.stubGlobal('chrome',originalChrome)});
+ const settle=async()=>{for(let i=0;i<50;i++)await Promise.resolve()};
+ it('retries the same window at most once after reconnecting',async()=>{
+  vi.useFakeTimers();const send=mockManager(async(m:any)=>m.action==='start'?{ok:true}:{ok:true,data:{foreign:false}});
+  const requestWindow=vi.fn(async()=>{throw new Error('Failed to fetch')}),onStatus=vi.fn();
+  const controller=createBoundedAsrController({cacheStore:null,onCues:vi.fn(),onStatus,getAudioSource:async()=>source,requestWindow});controller.start({...video,duration:30});await settle();
+  await vi.advanceTimersByTimeAsync(1000);await settle();expect(requestWindow).toHaveBeenCalledTimes(2);expect(send.mock.calls.filter(([m])=>m.action==='start')).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(60000);expect(requestWindow).toHaveBeenCalledTimes(2);expect(onStatus.mock.calls.at(-1)![0].phase).toBe('error');controller.stop();
+ });
+ it.each(['start','health'])('does not poll or retry after stopping while %s is pending',async phase=>{
+  vi.useFakeTimers();const held=deferred<any>(),send=mockManager((m:any)=>m.action===phase?held.promise:Promise.resolve(m.action==='start'?{ok:true}:{ok:true,data:{foreign:false}}));
+  const requestWindow=vi.fn(async()=>{throw new Error('ECONNREFUSED')}),onStatus=vi.fn();const controller=createBoundedAsrController({cacheStore:null,onCues:vi.fn(),onStatus,getAudioSource:async()=>source,requestWindow});controller.start({...video,duration:30});await settle();if(phase==='health')await vi.advanceTimersByTimeAsync(1000);
+  controller.stop();const count=send.mock.calls.length;held.resolve({ok:true,data:{foreign:false}});await settle();await vi.advanceTimersByTimeAsync(60000);expect(send).toHaveBeenCalledTimes(count);expect(requestWindow).toHaveBeenCalledOnce();expect(onStatus.mock.calls.at(-1)![0].phase).toBe('disabled');
+ });
+ it('cannot replay an old window or publish its error into a new video session',async()=>{
+  vi.useFakeTimers();const held=deferred<any>(),send=mockManager((m:any)=>m.action==='start'?Promise.resolve({ok:true}):held.promise);
+  const onCues=vi.fn(),requestWindow=vi.fn(async(p:any)=>{if(p.bvid==='new-video')return result(0,'New video');throw new Error('Failed to fetch')});
+  const controller=createBoundedAsrController({cacheStore:null,onCues,getAudioSource:async()=>source,requestWindow});controller.start({...video,duration:30});await settle();await vi.advanceTimersByTimeAsync(1000);
+  controller.start({...video,bvid:'new-video',duration:30});await settle();held.resolve({ok:true,data:{foreign:false}});await settle();expect(requestWindow).toHaveBeenCalledTimes(2);expect(onCues).toHaveBeenCalledOnce();expect(onCues.mock.calls[0][1].bvid).toBe('new-video');controller.stop();
+ });
+ it.each([true,false])('bounds readiness polling, including a foreign service (%s)',async foreign=>{
+  vi.useFakeTimers();const send=mockManager(async(m:any)=>m.action==='start'?{ok:true}:foreign?{ok:true,data:{foreign:true}}:{ok:false,error:{code:'FETCH',message:'offline'}});
+  const requestWindow=vi.fn(async()=>{throw new Error('Failed to fetch')});const controller=createBoundedAsrController({cacheStore:null,onCues:vi.fn(),getAudioSource:async()=>source,requestWindow});controller.start({...video,duration:30});await settle();await vi.advanceTimersByTimeAsync(60000);
+  expect(send).toHaveBeenCalledTimes(foreign?2:31);expect(requestWindow).toHaveBeenCalledOnce();controller.stop();
+ });
+});
+
 describe("loopback transport and time-axis contract", () => {
   it("sends a real cancel message and ignores a late successful response", async () => {
     const abort = new AbortController();

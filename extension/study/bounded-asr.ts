@@ -7,7 +7,7 @@ import type { AudioSource } from "../asr/audio-source.js";
 import { fetchStudyBiliJson } from "./cc-source.js";
 import { createChromeStudyAudioCache, type StudyAudioCacheStore } from "./study-audio-cache.js";
 import { repairAsrSegments } from "./cue-revisions.js";
-import { sendStudyMessage, type StudyAudioWindowPayload, type StudyAsrWindowMessage, type StudyAsrCancelMessage } from "./messaging.js";
+import { isStudyRecord, sendStudyMessage, type StudyAudioWindowPayload, type StudyAsrWindowMessage, type StudyAsrCancelMessage } from "./messaging.js";
 
 export const STUDY_ASR_CHUNK_SECONDS = 30;
 export const STUDY_ASR_AHEAD_SECONDS = 60;
@@ -116,6 +116,7 @@ interface Session {
   sourceAbort: AbortController;
   delivered: Set<string>;
   failed: Map<string, string>;
+  recovered: Set<string>;
 }
 
 interface ActiveWindow {
@@ -182,7 +183,7 @@ export function studyAudioCacheKey(input: {
 
 // The service contract uses absolute video seconds. Reject an ambiguous origin
 // rather than guessing and silently adding the window offset twice.
-export function normalizeStudyAudioCues(raw: unknown, slot: { start: number; duration: number }): StudyAudioCue[] {
+export function normalizeStudyAudioCues(raw: unknown, slot: { start: number; duration: number }, language?:string): StudyAudioCue[] {
   const data = raw as { timestamp_origin?: unknown; segments?: unknown } | null;
   if (data?.timestamp_origin !== "absolute" || !Array.isArray(data.segments)) {
     throw new Error("本地语音服务未返回绝对时间轴字幕");
@@ -199,7 +200,7 @@ export function normalizeStudyAudioCues(raw: unknown, slot: { start: number; dur
     const clippedTo = Math.min(end, to);
     if (clippedTo > clippedFrom) cues.push({ from: clippedFrom, to: clippedTo, content });
   }
-  return repairAsrSegments(cues);
+  return repairAsrSegments(cues,language);
 }
 
 function readableError(error: unknown): string {
@@ -361,12 +362,40 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       model: owner.model
     }, job.abort.signal).then((raw) => {
       if (session !== owner || job.abort.signal.aborted) return;
-      const cues = normalizeStudyAudioCues(raw, slot);
+      const cues = normalizeStudyAudioCues(raw, slot, owner.language);
       if ((raw as {opening_repair?:{version?:number}})?.opening_repair?.version===1)openingVersions.set(slot.key,1);
       putCache(slot.key, cues);
       deliver(owner, slot, cues, false);
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
       if (session !== owner || job.abort.signal.aborted) return;
+      const msg = error instanceof Error ? error.message : String(error);
+      const live=()=>session===owner&&active===job&&!job.abort.signal.aborted;
+      if (!owner.recovered.has(slot.key)&&(msg.includes("本地识别服务请求失败") || msg.includes("Failed to fetch") || msg.includes("ECONNREFUSED"))) {
+        owner.recovered.add(slot.key);
+        try {
+          status("waiting", "本地识别服务响应中断，正在尝试重新连接/唤醒…", owner, slot);
+          const startRes = await chrome.runtime.sendMessage({ type: "study-model-manager", action: "start", args: { model: owner.model, language: owner.language } });
+          if (!live())return;
+          if (isStudyRecord(startRes)&&startRes.ok===true) {
+            let ready = false;
+            for (let i = 0; i < 30; i++) {
+              if (!live()) return;
+              await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);job.abort.signal.removeEventListener('abort',finish);resolve()},timer=setTimeout(finish,1000);job.abort.signal.addEventListener('abort',finish,{once:true})});
+              if (!live())return;
+              try {
+                const ping = await sendStudyMessage({ type: "study-local-asr", action: "health", requestId: crypto.randomUUID() });
+                if (!live())return;
+                if (ping.ok && !ping.data.foreign) { ready = true; break; }
+                if (ping.ok&&ping.data.foreign)break;
+              } catch {}
+            }
+            if (ready && session === owner && !job.abort.signal.aborted) {
+              return;
+            }
+          }
+        } catch {}
+      }
+      if(!live())return;
       owner.failed.set(slot.key, readableError(error));
       status("error", `片段识别失败：${readableError(error)}`, owner, slot);
     }).finally(() => {
@@ -486,7 +515,8 @@ export function createBoundedAsrController(options: BoundedAsrOptions): BoundedA
       validatedSource: hasValidatedSource,
       sourceAbort: new AbortController(),
       delivered: new Set(),
-      failed: new Map()
+      failed: new Map(),
+      recovered: new Set()
     };
     session = owner;
     for(const range of input.completedWindows||[])for(let start=Math.ceil(range.start/30)*30;start<range.end;start+=30){const duration=Math.min(30,(owner.duration??Infinity)-start);if(start+duration<=range.end+.01)owner.delivered.add(studyAudioCacheKey({...owner,start,duration}));}

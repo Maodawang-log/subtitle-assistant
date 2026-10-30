@@ -56,7 +56,7 @@ beforeEach(async () => {
   aiReply = async () => ({ ok: true, text: JSON.stringify({ status: "suggested", suggestedText: "修正した字幕。", reason: "上下文中的识别错字。" }) });
   vi.stubGlobal("chrome", {
     runtime: { getURL: (path: string) => `chrome-extension://review/${path}`,
-      sendMessage: vi.fn(async (message: any) => message.type === "study-settings-public" ? { ok: true, config: { configured: false } } : message.type === "study-ai" ? aiReply(message) : { ok: true }),
+      sendMessage: vi.fn(async (message: any) => message.type === "study-settings-public" ? { ok: true, config: { configured: false } } : message.type === "study-ai" ? aiReply(message) : message.type === "study-local-asr" && message.action === "health" ? { ok: true, data: { foreign: false } } : { ok: true }),
       onMessage: { addListener: vi.fn() } },
     storage: { local: storage, onChanged: { addListener: vi.fn() } }
   });
